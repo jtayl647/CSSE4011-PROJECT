@@ -1,0 +1,8 @@
+sample:
+  name: sensor_node
+  description: Runs a sensor node.
+
+tests:
+  sample:
+    platform_allow: xiao_ble/nrf52840/sense
+    tags: sensor_node
