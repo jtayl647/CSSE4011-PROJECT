@@ -1,0 +1,36 @@
+# Zephyr build output
+build/
+**/build/
+
+# West workspace metadata
+.west/
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Compiled objects and binaries
+*.o
+*.a
+*.elf
+*.hex
+*.bin
+*.map
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+ninja.build
+build.ninja
