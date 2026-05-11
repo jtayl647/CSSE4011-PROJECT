@@ -1,0 +1,49 @@
+HOW TO RUN:
+________________________________________________________________________________________________________
+cd test-network
+./network.sh up createChannel -c mychannel
+./network.sh deployCC -ccn irrigation -ccp ../asset-transfer-basic/chaincode-typescript -ccl typescript
+
+cd ../asset-transfer-basic/application-gateway-typescript
+npm run build
+npm run server
+________________________________________________________________________________________________________
+
+NOTE: Server runs on http://localhost:3000
+
+HOW TO USE:
+
+POST /reading
+  Submit a sensor reading to the blockchain.
+  Body (JSON):
+    {
+      "nodeId":      "node1",
+      "timestamp":   "2026-05-11T08:32:00",
+      "moisture":    45,
+      "humidity":    62,
+      "temperature": 24,
+      "pressure":    1013
+    }
+
+  Example:
+    curl -X POST http://localhost:3000/reading \
+      -H "Content-Type: application/json" \
+      -d '{"nodeId":"node1","timestamp":"2026-05-11T08:32:00","moisture":45,"humidity":62,"temperature":24,"pressure":1013}'
+
+GET /readings
+  Returns all sensor readings from the blockchain.
+
+  Example:
+    curl http://localhost:3000/readings
+
+GET /readings/:nodeId
+  Returns all readings for a specific node.
+
+  Example:
+    curl http://localhost:3000/readings/node1
+
+HOW TO STOP:
+________________________________________________________________________________________________________
+cd test-network
+./network.sh down
+________________________________________________________________________________________________________
