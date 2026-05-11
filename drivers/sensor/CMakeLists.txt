@@ -1,0 +1,1 @@
+add_subdirectory_ifdef(CONFIG_CSSE4011_TMP36 csse4011_tmp36)
