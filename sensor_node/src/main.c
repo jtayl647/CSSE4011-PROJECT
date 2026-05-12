@@ -31,6 +31,8 @@ static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 			 void *ctx)
 {
 	LOG_INF("Received: %.*s", len, (const char *)data);
+
+	// decode here probs.
 	/* TODO: parse config commands (threshold, pump on/off/auto, data ACK) */
 }
 
