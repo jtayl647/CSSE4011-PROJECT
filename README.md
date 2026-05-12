@@ -1,3 +1,5 @@
 # CSSE4011-PROJECT
 
-FINAL PROJECT GITHUB
+Authors: Jaimee and Lleyton
+
+Look at Wiki for information about this Project
