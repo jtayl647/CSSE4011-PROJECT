@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "nanopb.proto";
+
+message DataReadings {
+    int32 temp = 1;
+    int32 humidity = 2;
+    int32 pressure = 3;
+    int32 moisture = 4;
+    int32 meas_time = 5;
+}
+
+message SensorNode {
+    bytes mac_address = 1;
+    int32 ble_time = 2;
+    repeated DataReadings readings = 3;
+}
+
+message Nodes {
+    repeated SensorNode nodes = 1;
+}

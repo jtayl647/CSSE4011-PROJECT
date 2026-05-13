@@ -1,0 +1,3 @@
+SensorNode.mac_address max_size: @CONFIG_MAC_BYTES@ fixed_length:true
+SensorNode.readings max_count: @CONFIG_NUM_READINGS@
+Nodes.nodes max_count: @CONFIG_SENSOR_NUM@
