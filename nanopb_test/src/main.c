@@ -31,14 +31,12 @@ void fill_buffer(Envelope *envelope, int letterNum, const char* msg) {
     ] = '\0';
 	
 	// printk("this is the strlen of the string: %d\n", strlen(msg));
-	//printk("this is the string: %s\n", msg);
+	// printk("this is the string: %s\n", msg);
 
 	//envelope->letter[letterNum].buffer[2] = '\0';
 
 	printk("First Item added: %c\n", envelope->letter[letterNum].buffer[0]);
 	printk("Second Item added: %c\n", envelope->letter[letterNum].buffer[1]);
-	// 	
-
 }
 
 void write_letter(Envelope *envelope) {
@@ -154,7 +152,7 @@ int main(void)
 	//  */
 
 	// /* But because we are lazy, we will just decode it immediately. */
-	// decode_message(buffer, message_length);
+	decode_message(buffer, message_length);
 	return 0;
 }
 
