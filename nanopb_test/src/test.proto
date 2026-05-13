@@ -3,9 +3,11 @@
 
 syntax = "proto3";
 
+import "nanopb.proto";
+
 message SimpleMessage {
     int32 sender = 1;
-    string buffer = 2 [(nanopb).initializer = "00"];
+    string buffer = 2 [(nanopb).initializer = "\"AA\""];;
     int32 receiver = 3;
 }
 
