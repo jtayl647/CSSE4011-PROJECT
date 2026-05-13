@@ -5,7 +5,7 @@ syntax = "proto3";
 
 message SimpleMessage {
     int32 sender = 1;
-    string buffer = 2;
+    string buffer = 2 [(nanopb).initializer = "00"];
     int32 receiver = 3;
 }
 

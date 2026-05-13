@@ -22,13 +22,13 @@ void fill_buffer(Envelope *envelope, int letterNum, const char* msg) {
 
 	printk("this is sizeof on the buffer: %d\n", sizeof(envelope->letter[letterNum].buffer));
 	printk("this is sizeof on the msg: %d\n", sizeof(msg));
-	// strncpy(envelope->letter[letterNum].buffer,
-    //     msg,
-    //     sizeof(envelope->letter[letterNum].buffer) - 1);
+	strncpy(envelope->letter[letterNum].buffer,
+        msg,
+        sizeof(envelope->letter[letterNum].buffer) - 1);
 
-	// envelope->letter[letterNum].buffer[
-    //     sizeof(envelope->letter[letterNum].buffer) - 1
-    // ] = '\0';
+	envelope->letter[letterNum].buffer[
+        sizeof(envelope->letter[letterNum].buffer) - 1
+    ] = '\0';
 	
 	// printk("this is the strlen of the string: %d\n", strlen(msg));
 	//printk("this is the string: %s\n", msg);
@@ -36,10 +36,7 @@ void fill_buffer(Envelope *envelope, int letterNum, const char* msg) {
 	//envelope->letter[letterNum].buffer[2] = '\0';
 
 	printk("First Item added: %c\n", envelope->letter[letterNum].buffer[0]);
-
-	//The second character cannot be printed, and the system shits itself.
-	// Somewhere there is a memory issue, overwriting something. uncertain
-	// printk("Second Item added: %c\n", envelope->letter[letterNum].buffer[1]);
+	printk("Second Item added: %c\n", envelope->letter[letterNum].buffer[1]);
 	// 	
 
 }
@@ -51,16 +48,16 @@ void write_letter(Envelope *envelope) {
 		envelope->letter[i].sender = i;
 		envelope->letter[i].receiver = 1;	
 		if (i < 1) {
-			char msg[] = "l1";
+			char msg[] = "L1";
 			fill_buffer(envelope, i, msg);
 		} else if (i < 2){
-			char msg[] = "l2";
+			char msg[] = "L2";
 			fill_buffer(envelope, i, msg);
 		} else if (i < 3) {
-			char msg[] = "l3";	
+			char msg[] = "L3";	
 			fill_buffer(envelope, i, msg);
 		} else {
-			char msg[] = "l4";
+			char msg[] = "L4";
 			fill_buffer(envelope, i, msg);
 		}
 	}
