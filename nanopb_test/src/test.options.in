@@ -1,0 +1,2 @@
+SimpleMessage.buffer max_size:@CONFIG_SAMPLE_BUFFER_SIZE@
+Envelope.letter max_count: 4
