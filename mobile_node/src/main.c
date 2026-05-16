@@ -7,10 +7,14 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
-#include "../build/sensor_info.pb.h"
-#include "../build/sensor_config.pb.h"
+//#include "../build/sensor_info.pb.h"
+//#include "../build/sensor_config.pb.h"
+#include <sensor_config.pb.h>
+#include <sensor_info.pb.h>
 #include <pb_encode.h>
 #include <pb_decode.h>
+#include "mobile_pb.h"
+#include "nanopb_types.h"
 
 LOG_MODULE_REGISTER(mobile_node, LOG_LEVEL_INF);
 

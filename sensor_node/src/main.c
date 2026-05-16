@@ -6,6 +6,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
+#include "sensor_pb.h"
+#include "nanopb_types.h"
 
 LOG_MODULE_REGISTER(sensor_node, LOG_LEVEL_INF);
 
@@ -31,8 +33,6 @@ static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 			 void *ctx)
 {
 	LOG_INF("Received: %.*s", len, (const char *)data);
-
-	// decode here probs.
 	/* TODO: parse config commands (threshold, pump on/off/auto, data ACK) */
 }
 

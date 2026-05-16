@@ -8,6 +8,12 @@
 #include <stddef.h>
 #include "mobile_pb.h"
 #include <zephyr/kernel.h>
+#include "nanopb_types.h"
+
+static bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message);
+static bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message);
+static bool decode_sensor_node(uint8_t *buffer, size_t message_length, void* message);
+static bool decode_all_configs(uint8_t *buffer, size_t message_length, void* message);
 
 /*******************************************************
  * Mobile Node Encoding Functions
@@ -54,7 +60,7 @@ int mobile_encode(uint8_t *buffer, size_t buffer_size, size_t *message_length, u
  * @param message Pointer to the struct to encode
  *************************************************/
 
-bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message) {
+static bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message) {
 
     bool status;
 
@@ -67,11 +73,13 @@ bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_l
 	/* Now we are ready to encode the message! */
 	status = pb_encode(&stream, SensorConfig_fields, config);
 	*message_length = stream.bytes_written;
-	printk("This is the number of bytes written: %d\n", (int) stream.bytes_written);
+	printk("Number of SensorConfig bytes written: %d\n", (int) stream.bytes_written);
 
 	if (!status) {
-		printk("Encoding failed: %s\n", PB_GET_ERROR(&stream));
-	}
+		printk("Encoding SensorConfig struct failed: %s\n", PB_GET_ERROR(&stream));
+	} else {
+        printk("Encoded SensorConfig struct\n");
+    }
 
 	return status;
 }
@@ -85,7 +93,7 @@ bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_l
  * @param message Pointer to the struct to encode
  *************************************************/
 
-bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message) {
+static bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message) {
 
     bool status;
 
@@ -98,11 +106,13 @@ bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, v
 	/* Now we are ready to encode the message! */
 	status = pb_encode(&stream, Nodes_fields, nodes);
 	*message_length = stream.bytes_written;
-	printk("This is the number of bytes written: %d\n", (int) stream.bytes_written);
+	printk("Number of Nodes bytes written: %d\n", (int) stream.bytes_written);
 
 	if (!status) {
-		printk("Encoding failed: %s\n", PB_GET_ERROR(&stream));
-	}
+		printk("Encoding Nodes struct failed: %s\n", PB_GET_ERROR(&stream));
+	} else {
+        printk("Encoded Nodes Struct\n");
+    }
 
 	return status;
 }
@@ -122,7 +132,7 @@ bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, v
  * @param message Pointer to the struct to write decoded information to
  *************************************************/
 
-int mobile_decode(uint8_t *buffer, size_t *message_length, uint8_t type, void* message) {
+int mobile_decode(uint8_t *buffer, size_t message_length, uint8_t type, void* message) {
     if (type == SENSOR_NODE) {
         //sensor node decode function
         if (decode_sensor_node(buffer, message_length, message)) {
@@ -152,7 +162,7 @@ int mobile_decode(uint8_t *buffer, size_t *message_length, uint8_t type, void* m
  * @param message Pointer to the struct to write decoded information to
  *************************************************/
 
-bool decode_sensor_node(uint8_t *buffer, size_t *message_length, void* message) {
+static bool decode_sensor_node(uint8_t *buffer, size_t message_length, void* message) {
     bool status;
 
 	//assume that we are being passed a struct that has been initialised properly
@@ -167,11 +177,11 @@ bool decode_sensor_node(uint8_t *buffer, size_t *message_length, void* message) 
 	/* Check for errors... */
 	if (status) {
 		/* Print the data contained in the message. */
-		printk("Successfully Decoded sensor node type message")
+		printk("Successfully Decoded SensorNode struct");
 		printk("\n");
 		pb_release(SensorNode_fields, sensor);
 	} else {
-		printk("Decoding sensor node message failed: %s\n", PB_GET_ERROR(&stream));
+		printk("Decoding SensorNode struct failed: %s\n", PB_GET_ERROR(&stream));
 	}
 
 	return status;
@@ -185,7 +195,7 @@ bool decode_sensor_node(uint8_t *buffer, size_t *message_length, void* message) 
  * @param message Pointer to the struct to write decoded information to
  *************************************************/
 
-bool decode_all_configs(uint8_t *buffer, size_t *message_length, void* message) {
+static bool decode_all_configs(uint8_t *buffer, size_t message_length, void* message) {
     bool status;
 
 	//assume that we are being passed a struct that has been initialised properly
@@ -195,16 +205,16 @@ bool decode_all_configs(uint8_t *buffer, size_t *message_length, void* message) 
 	pb_istream_t stream = pb_istream_from_buffer(buffer, message_length);
 
 	/* Now we are ready to decode the message. */
-	status = pb_decode(&stream, AllCOnfigs_fields, configs);
+	status = pb_decode(&stream, AllConfigs_fields, configs);
 
 	/* Check for errors... */
 	if (status) {
 		/* Print the data contained in the message. */
-		printk("Successfully Decoded {AllConfigs} type message")
+		printk("Successfully Decoded AllConfigs struct\n");
 		printk("\n");
 		pb_release(AllConfigs_fields, configs);
 	} else {
-		printk("Decoding sensor node message failed: %s\n", PB_GET_ERROR(&stream));
+		printk("Decoding AllConfigs struct failed: %s\n", PB_GET_ERROR(&stream));
 	}
 
 	return status;
