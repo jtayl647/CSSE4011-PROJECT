@@ -11,3 +11,4 @@ zephyr_nanopb_sources(app ../nanopb_driver/src/sensor_config.proto ../nanopb_dri
 
 FILE(GLOB app_sources src/*.c)
 target_sources(app PRIVATE ${app_sources})
+target_include_directories(app PRIVATE include)
