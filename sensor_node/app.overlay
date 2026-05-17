@@ -1,0 +1,22 @@
+/ {
+    soil1: soil {
+        compatible = "csse4011,soil";
+        status = "okay";
+    };
+};
+
+&i2c1 {
+    status = "okay";
+
+    /* SHT30 — temperature + humidity (Zephyr built-in driver) */
+    sht30: sht3xd@44 {
+        compatible = "sensirion,sht3xd";
+        reg = <0x44>;
+    };
+
+    /* QMP6988 — barometric pressure (custom driver) */
+    qmp6988: qmp6988@70 {
+        compatible = "csse4011,qmp6988";
+        reg = <0x70>;
+    };
+};

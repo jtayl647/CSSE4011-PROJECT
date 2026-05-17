@@ -1,0 +1,7 @@
+config CSSE4011_SOIL
+	bool "SparkFun soil moisture sensor driver"
+	depends on SENSOR
+	depends on ADC
+	default n
+	help
+	  Enable the SparkFun soil moisture sensor driver on AIN0 (P0.02 / D0).

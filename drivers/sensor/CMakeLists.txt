@@ -1,1 +1,2 @@
-add_subdirectory_ifdef(CONFIG_CSSE4011_TMP36 csse4011_tmp36)
+add_subdirectory_ifdef(CONFIG_CSSE4011_SOIL csse4011_soil)
+add_subdirectory_ifdef(CONFIG_CSSE4011_QMP6988 csse4011_qmp6988)

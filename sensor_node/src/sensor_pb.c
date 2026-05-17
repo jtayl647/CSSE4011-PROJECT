@@ -79,7 +79,7 @@ static bool encode_sensor_node(uint8_t *buffer, size_t buffer_size, size_t *mess
  * @param message Pointer to the struct to write decoded information to
  *************************************************/
 
-int sensor_decode(uint8_t *buffer, size_t message_length, uint8_t type, void* message) {
+int sensor_decode_function(uint8_t *buffer, size_t message_length, uint8_t type, void* message) {
     if (type == SENSOR_CONFIG) {
         //do the sensor config decoding
         decode_sensor_config(buffer, message_length, message);

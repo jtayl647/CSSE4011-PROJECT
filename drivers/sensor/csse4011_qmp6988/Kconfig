@@ -1,0 +1,8 @@
+config CSSE4011_QMP6988
+	bool "QMP6988 pressure sensor driver"
+	depends on SENSOR
+	depends on I2C
+	default n
+	help
+	  Enable the QMP6988 barometric pressure sensor driver (I2C 0x70).
+	  Part of the M5Stack ENV III unit.

@@ -1,7 +1,0 @@
-config CSSE4011_TMP36
-	bool "CSSE4011 TMP36 sensor driver"
-	depends on SENSOR
-	depends on ADC
-	default n
-	help
-	  Enable the CSSE4011 TMP36 sensor driver.
