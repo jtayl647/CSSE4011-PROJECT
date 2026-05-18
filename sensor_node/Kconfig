@@ -19,7 +19,7 @@ config MAC_BYTES
 
 config NUM_READINGS
     int "Number of data readings taken from sensor before erasure of files"
-        default 2
+        default 12
         help
             Configure the number of readings taken from sensors before erasing data
 

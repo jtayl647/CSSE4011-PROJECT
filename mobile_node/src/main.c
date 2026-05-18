@@ -29,7 +29,7 @@ static const uint8_t nus_uuid[16] = {
 
 static struct bt_conn *default_conn;
 
-#define RETRY_DELAY_MS 30000
+#define RETRY_DELAY_MS 100000
 
 /* Forward declarations */
 static void start_scan(void);
@@ -65,12 +65,12 @@ static uint16_t                        nus_rx_handle;
 static struct bt_gatt_exchange_params  exchange_params;
 static struct bt_gatt_write_params     write_params;
 
-/* Config to send back to the sensor after receiving its data */
-static const char config_payload[] = "threshold=30,pump=auto";
+/* Encoded config buffer — filled once in notify_func, sent in write_done */
+static uint8_t config_buf[SensorConfig_size];
+static size_t  config_buf_len;
 
 /* ------------------------------------------------------------------
  * Write callback — fires after sensor ACKs the config write.
- * Safe to disconnect here.
  * ------------------------------------------------------------------ */
 static void write_done(struct bt_conn *conn, uint8_t err,
 		       struct bt_gatt_write_params *params)
@@ -78,7 +78,7 @@ static void write_done(struct bt_conn *conn, uint8_t err,
 	if (err) {
 		printk("Config write failed (err %d)\n", err);
 	} else {
-		printk("Config sent: %s\n", config_payload);
+		printk("Config sent successfully\n");
 	}
 
 	printk("Disconnecting...\n");
@@ -86,7 +86,8 @@ static void write_done(struct bt_conn *conn, uint8_t err,
 }
 
 /* ------------------------------------------------------------------
- * Notification callback — receives sensor data, then sends config.
+ * Notification callback — decodes incoming SensorNode, then sends
+ * an encoded SensorConfig back.
  * ------------------------------------------------------------------ */
 static uint8_t notify_func(struct bt_conn *conn,
 			   struct bt_gatt_subscribe_params *params,
@@ -97,28 +98,63 @@ static uint8_t notify_func(struct bt_conn *conn,
 		return BT_GATT_ITER_STOP;
 	}
 
-	printk("Sensor data: %.*s\n", length, (const char *)data);
+	/* --- decode incoming SensorNode --- */
+	SensorNode node = SensorNode_init_zero;
+	int ret = mobile_decode((uint8_t *)data, length, SENSOR_NODE, &node);
+	if (ret == 0) {
+		printk("MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+		       node.mac_address[5], node.mac_address[4],
+		       node.mac_address[3], node.mac_address[2],
+		       node.mac_address[1], node.mac_address[0]);
+
+		for (int i = 0; i < node.readings_count; i++) {
+			DataReadings *r = &node.readings[i];
+			printk("[%d] temp=%d.%02d humidity=%d moisture=%d pressure=%d.%02d\n",
+			       i,
+			       r->temp / 100, r->temp % 100,
+			       r->humidity,
+			       r->moisture,
+			       r->pressure / 100, r->pressure % 100);
+		}
+	} else {
+		printk("Failed to decode SensorNode\n");
+	}
 
 	if (nus_rx_handle == 0) {
-		printk("RX handle not ready yet, disconnecting anyway\n");
+		printk("RX handle not ready, disconnecting\n");
 		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 		return BT_GATT_ITER_STOP;
 	}
 
-	/* Write config back to sensor; disconnect in write_done callback */
+	/* --- encode a test SensorConfig to send back --- */
+	SensorConfig config = SensorConfig_init_zero;
+	config.automate      = true;
+	config.water_period  = 10;   /* seconds */
+	config.water_trigger = 30;   /* moisture % threshold */
+
+	config_buf_len = 0;
+	ret = mobile_encode(config_buf, sizeof(config_buf),
+			    &config_buf_len, SENSOR_CONFIG, &config);
+	if (ret != 0) {
+		printk("Failed to encode SensorConfig\n");
+		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+		return BT_GATT_ITER_STOP;
+	}
+
+	/* Write config to sensor RX; disconnect in write_done */
 	write_params.func   = write_done;
 	write_params.handle = nus_rx_handle;
 	write_params.offset = 0;
-	write_params.data   = config_payload;
-	write_params.length = strlen(config_payload);
+	write_params.data   = config_buf;
+	write_params.length = config_buf_len;
 
 	int err = bt_gatt_write(conn, &write_params);
 	if (err) {
-		printk("Config write start failed (err %d), disconnecting\n", err);
+		printk("Config write failed (err %d), disconnecting\n", err);
 		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 	}
 
-	return BT_GATT_ITER_STOP; /* unsubscribe — we're done with this node */
+	return BT_GATT_ITER_STOP;
 }
 
 /* ------------------------------------------------------------------
@@ -367,7 +403,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	nus_tx_handle = 0;
 	nus_rx_handle = 0;
 
-	printk("Scanning again in 30s...\n");
+	printk("Scanning again in 100s...\n");
 	k_work_schedule(&scan_retry_work, K_MSEC(RETRY_DELAY_MS));
 }
 
