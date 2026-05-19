@@ -14,6 +14,7 @@
 #include <pb_decode.h>
 #include "mobile_pb.h"
 #include "nanopb_types.h"
+#include "mobile_lfs.h"
 
 #define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
