@@ -11,20 +11,59 @@
 #include "nanopb_types.h"
 #include <sensor_info.pb.h>
 #include <sensor_config.pb.h>
+#include "sensor_lfs.h"
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/littlefs.h>
+#include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(sensor_node, LOG_LEVEL_INF);
 
 /* Custom channel for soil moisture percentage */
 #define SENSOR_CHAN_SOIL_MOISTURE ((enum sensor_channel)(SENSOR_CHAN_PRIV_START + 1))
 
-#define SENSOR_READ_INTERVAL_S 30
+#define SENSOR_READ_INTERVAL_S 5
 #define SENSOR_THREAD_STACK    2048
+#define FILE_WRITE_THREAD_STACK 2048
 #define SENSOR_THREAD_PRIO     5
+#define FILE_WRITE_THREAD_PRIO 6
+
+//Struct which represents the LittleFS architecture
+FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(storage);
+static struct fs_mount_t lfs_storage_mnt = {
+	.type = FS_LITTLEFS,
+	.fs_data = &storage,
+	.storage_dev = (void *)FIXED_PARTITION_ID(storage_partition),
+	.mnt_point = "/lfs",
+};
+
+//Global pointer to the mountpoint
+struct fs_mount_t *mountpoint = &lfs_storage_mnt;
+
+//name of the file that past readings are being stored in
+static const char *readings_filename = "readings.txt";
+
+//Full path of the file where past readings are being stored
+static char readings_path[MAX_PATH_LEN];
+
+//File where past readings are being stored
+static struct fs_file_t readings_file;
 
 /* A mutex protects it because the sensor thread writes and the BLE
  * callback reads at the same time. */
 static SensorNode g_node = SensorNode_init_zero;
 static struct k_mutex g_node_mutex;
+
+//A mutex to guard the file
+K_MUTEX_DEFINE(file_mutex);
+
+//A msgq that to send information between a sensor thread and a file writing thread
+K_MSGQ_DEFINE(file_write_msgq,
+              sizeof(DataReadings),
+              10,
+              4);
+
+//number of times we have read the sensors
+static int num_reads = 0;
 
 /* If the readings array is already full (max 24 set by CONFIG_NUM_READINGS),
  * the oldest entry is dropped by shifting everything left so we always
@@ -80,6 +119,7 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 	}
 
 	while (1) {
+		LOG_INF("Entering Sensor Thread While Loop\n");
 		/* Values default to 0 — if a sensor is missing its field
 		 * is just 0 in the reading rather than blocking the whole save */
 		int32_t moisture_val = 0;
@@ -93,6 +133,7 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 			if (sensor_sample_fetch(soil) == 0 &&
 			    sensor_channel_get(soil, SENSOR_CHAN_SOIL_MOISTURE, &moisture) == 0) {
 				moisture_val = moisture.val1;
+				LOG_INF("moisture: %d\n", moisture_val);
 			}
 		}
 
@@ -104,6 +145,8 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 				sensor_channel_get(sht30, SENSOR_CHAN_HUMIDITY,     &humidity);
 				temp_val     = temp.val1 * 100 + temp.val2 / 10000;
 				humidity_val = humidity.val1;
+				LOG_INF("temp: %d\n", temp_val);
+				LOG_INF("humidity: %d\n", humidity_val);
 			}
 		}
 
@@ -113,11 +156,25 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 			if (sensor_sample_fetch(qmp6988) == 0 &&
 			    sensor_channel_get(qmp6988, SENSOR_CHAN_PRESS, &pressure) == 0) {
 				pressure_val = pressure.val1 * 1000 + pressure.val2 / 1000;
+				LOG_INF("pressure: %d\n", pressure_val);
 			}
 		}
 
+		//make a DataReadings struct
+		DataReadings reading = DataReadings_init_zero;
+
+		//Put the values into the struct
+		reading.temp = temp_val;
+		reading.humidity = humidity_val;
+		reading.pressure = pressure_val;
+		reading.moisture = moisture_val;
+		reading.meas_time = (int32_t)k_uptime_get_32();
+
+		//send the readings to the writing thread
+		k_msgq_put(&file_write_msgq, &reading, K_NO_WAIT);
+
 		/* Always save — missing sensors just contribute 0 */
-		add_reading(temp_val, humidity_val, pressure_val, moisture_val);
+		// add_reading(temp_val, humidity_val, pressure_val, moisture_val);
 
 		k_sleep(K_SECONDS(SENSOR_READ_INTERVAL_S));
 	}
@@ -126,6 +183,55 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 K_THREAD_DEFINE(sensor_thread, SENSOR_THREAD_STACK,
 		sensor_thread_fn, NULL, NULL, NULL,
 		SENSOR_THREAD_PRIO, 0, 0);
+
+
+/*=============================================================
+ * File Writing Thread - writes past sensor readings to a file
+ * and deletes old data if too much information has been stored
+ ==============================================================*/
+ 
+static void file_write_thread_fn(void *a, void *b, void *c) {
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+
+	DataReadings to_write = DataReadings_init_zero;
+
+	while(1) {
+
+		if (num_reads >= CONFIG_NUM_READINGS) {
+			LOG_INF("Entering File Reset Block\n");
+			//lock the mutex for the file
+			k_mutex_lock(&file_mutex, K_FOREVER);
+
+			//truncate the file
+			int err = sensor_lfs_file_truncate((void*)(&readings_file), readings_path);
+			if (err < 0) {
+				LOG_ERR("Sensor Thread failed to truncate readings file\n");
+			}
+
+			k_mutex_unlock(&file_mutex);
+			num_reads = 0;
+			LOG_INF("Exiting File Rest Block\n");
+
+		}
+
+		//wait on the queue
+		k_msgq_get(&file_write_msgq, &to_write, K_FOREVER);
+
+		//write this information into the file
+		k_mutex_lock(&file_mutex, K_FOREVER);
+		int err = sensor_lfs_write_to_file((void*)(&readings_file), readings_path, (void*)(&to_write));
+		if (err < 0) {
+			LOG_ERR("Write thread failed to write to file\n");
+		} 
+		k_mutex_unlock(&file_mutex);
+		//increase the number of times we have sampled data
+		num_reads++;
+	}
+}
+
+K_THREAD_DEFINE(file_write_thread, FILE_WRITE_THREAD_STACK,
+		file_write_thread_fn, NULL, NULL, NULL,
+		FILE_WRITE_THREAD_PRIO, 0, 0);
 
 /* ==========================================================================
  * BLE
@@ -171,7 +277,18 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 
 	printk("Mobile subscribed - sending sensor data\n");
 
+	//lock the mutex for the file and the big scary struct
+
+	k_mutex_lock(&file_mutex, K_FOREVER);
 	k_mutex_lock(&g_node_mutex, K_FOREVER);
+
+	//now read from our file
+	int err = sensor_lfs_read_from_file((void*)(&readings_file), readings_path, (void*)(&g_node));
+
+	if (err < 0) {
+		LOG_ERR("Blue Notification Function Failed to Read From readings file\n");
+	}
+	//Now the data should be available within our struct of readings
 
 	/* static so it lives in BSS not on the BLE callback stack (1387 bytes) */
 	static uint8_t buf[SensorNode_size];
@@ -184,13 +301,14 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 	}
 
 	k_mutex_unlock(&g_node_mutex);
+	k_mutex_unlock(&file_mutex);
 
 	if (ret != 0) {
 		printk("Encode failed\n");
 		return;
 	}
 
-	int err = bt_nus_send(NULL, buf, len);
+	err = bt_nus_send(NULL, buf, len);
 	if (err) {
 		printk("Send failed (err %d)\n", err);
 	} else {
@@ -260,6 +378,14 @@ int main(void)
 		printk("Failed to enable bluetooth: %d\n", err);
 		return err;
 	}
+
+	//Set up the file system
+	int f_err = sensor_lfs_init((void*)mountpoint, (void*)(&readings_file), readings_filename, readings_path);
+	if (f_err < 0) {
+		printk("Failed to initialise the LittleFS\n");
+		return f_err;
+	}
+
 
 	bt_addr_le_t addr;
 	size_t count = 1;
