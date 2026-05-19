@@ -5,7 +5,6 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
 #include <string.h>
 //#include "../build/sensor_info.pb.h"
 //#include "../build/sensor_config.pb.h"
@@ -15,8 +14,6 @@
 #include <pb_decode.h>
 #include "mobile_pb.h"
 #include "nanopb_types.h"
-
-LOG_MODULE_REGISTER(mobile_node, LOG_LEVEL_INF);
 
 #define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
