@@ -1,0 +1,5 @@
+description: SparkFun soil moisture sensor ADC driver
+
+compatible: "csse4011,soil"
+
+include: base.yaml

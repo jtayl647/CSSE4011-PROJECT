@@ -1,0 +1,5 @@
+description: CSSE4011 Trimpot ADC sensor
+
+compatible: "csse4011,trim"
+
+include: base.yaml

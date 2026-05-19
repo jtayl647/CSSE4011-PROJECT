@@ -1,0 +1,5 @@
+description: CSSE4011 Temp ADC sensor
+
+compatible: "csse4011,tmp36"
+
+include: base.yaml

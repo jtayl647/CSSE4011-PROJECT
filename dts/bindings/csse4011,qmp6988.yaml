@@ -1,0 +1,5 @@
+description: QMP6988 barometric pressure sensor (I2C)
+
+compatible: "csse4011,qmp6988"
+
+include: [base.yaml, i2c-device.yaml]
