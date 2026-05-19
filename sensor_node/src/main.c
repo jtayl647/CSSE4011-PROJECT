@@ -542,6 +542,10 @@ int main(void)
 	bt_id_get(&addr, &count);
 	memcpy(g_node.mac_address, addr.a.val, sizeof(g_node.mac_address));
 
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(&addr, addr_str, sizeof(addr_str));
+	printk("BLE address: %s\n", addr_str);
+
 	k_sleep(K_SECONDS(3));
 
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));

@@ -7,7 +7,7 @@ mainmenu "Sensor Node Configs"
 
 config SENSOR_NUM
 	int "Number of sensors in system"
-	default 2
+	default 4
 	help
 	  Configure the number of sensors stored.
 

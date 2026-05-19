@@ -18,11 +18,25 @@
 #define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 
-/* NUS service UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E (little-endian) */
-static const uint8_t nus_uuid[16] = {
-	0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-	0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e
+/* ==========================================================================
+ * Sensor name filter list — add names here to connect to more nodes
+ * ========================================================================== */
+static const char *const target_names[] = {
+	"SensorNode",
+	/* "SensorNode2", */
+	/* "GardenNode",  */
 };
+
+static bool name_in_list(const uint8_t *data, uint8_t data_len)
+{
+	for (int i = 0; i < ARRAY_SIZE(target_names); i++) {
+		if (data_len == strlen(target_names[i]) &&
+		    memcmp(data, target_names[i], data_len) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 static struct bt_conn *default_conn;
 
@@ -295,7 +309,9 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 		return;
 	}
 
-	if (type != BT_GAP_ADV_TYPE_SCAN_RSP) {
+	/* Name is in ADV_IND — ignore other packet types */
+	if (type != BT_GAP_ADV_TYPE_ADV_IND &&
+	    type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
 		return;
 	}
 
@@ -307,10 +323,9 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 		uint8_t len = net_buf_simple_pull_u8(buf);
 		if (!len || len > buf->len) break;
 		uint8_t ad_type = net_buf_simple_pull_u8(buf);
-		if ((ad_type == BT_DATA_UUID128_ALL ||
-		     ad_type == BT_DATA_UUID128_SOME) &&
-		    len - 1 == 16 &&
-		    memcmp(buf->data, nus_uuid, 16) == 0) {
+		if ((ad_type == BT_DATA_NAME_COMPLETE ||
+		     ad_type == BT_DATA_NAME_SHORTENED) &&
+		    name_in_list(buf->data, len - 1)) {
 			found = true;
 			break;
 		}
@@ -323,7 +338,9 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 		return;
 	}
 
-	printk("Found sensor node! RSSI=%d connecting...\n", rssi);
+	char addr_str[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+	printk("Found sensor node [%s] RSSI=%d — connecting...\n", addr_str, rssi);
 
 	bt_le_scan_stop();
 
@@ -341,7 +358,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 static void start_scan(void)
 {
 	struct bt_le_scan_param scan_param = {
-		.type     = BT_LE_SCAN_TYPE_ACTIVE,
+		.type     = BT_LE_SCAN_TYPE_PASSIVE,
 		.options  = BT_LE_SCAN_OPT_NONE,
 		.interval = BT_GAP_SCAN_FAST_INTERVAL_MIN,
 		.window   = BT_GAP_SCAN_FAST_WINDOW,
