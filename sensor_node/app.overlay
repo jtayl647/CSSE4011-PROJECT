@@ -3,6 +3,19 @@
         compatible = "csse4011,soil";
         status = "okay";
     };
+
+    /* Water pump on D1 (P0.03) — driven HIGH to turn on */
+    pump_ctrl {
+        compatible = "gpio-leds";
+        pump0: pump_0 {
+            gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+            label = "Water Pump";
+        };
+    };
+
+    aliases {
+        pump0 = &pump0;
+    };
 };
 
 &i2c1 {

@@ -26,7 +26,7 @@ static const uint8_t nus_uuid[16] = {
 
 static struct bt_conn *default_conn;
 
-#define RETRY_DELAY_MS 100000
+#define RETRY_DELAY_MS 30000
 
 /* Forward declarations */
 static void start_scan(void);
@@ -99,19 +99,21 @@ static uint8_t notify_func(struct bt_conn *conn,
 	SensorNode node = SensorNode_init_zero;
 	int ret = mobile_decode((uint8_t *)data, length, SENSOR_NODE, &node);
 	if (ret == 0) {
-		printk("MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+		printk("MAC: %02x:%02x:%02x:%02x:%02x:%02x  ble_time=%d ms\n",
 		       node.mac_address[5], node.mac_address[4],
 		       node.mac_address[3], node.mac_address[2],
-		       node.mac_address[1], node.mac_address[0]);
+		       node.mac_address[1], node.mac_address[0],
+		       node.ble_time);
 
 		for (int i = 0; i < node.readings_count; i++) {
 			DataReadings *r = &node.readings[i];
-			printk("[%d] temp=%d.%02d humidity=%d moisture=%d pressure=%d.%02d\n",
+			printk("[%d] temp=%d.%02d humidity=%d moisture=%d pressure=%d.%02d meas_time=%d ms\n",
 			       i,
 			       r->temp / 100, r->temp % 100,
 			       r->humidity,
 			       r->moisture,
-			       r->pressure / 100, r->pressure % 100);
+			       r->pressure / 100, r->pressure % 100,
+			       r->meas_time);
 		}
 	} else {
 		printk("Failed to decode SensorNode\n");
@@ -127,7 +129,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 	SensorConfig config = SensorConfig_init_zero;
 	config.automate      = true;
 	config.water_period  = 10;   /* seconds */
-	config.water_trigger = 30;   /* moisture % threshold */
+	config.water_trigger = 90;   /* moisture % threshold */
 
 	config_buf_len = 0;
 	ret = mobile_encode(config_buf, sizeof(config_buf),
@@ -400,7 +402,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	nus_tx_handle = 0;
 	nus_rx_handle = 0;
 
-	printk("Scanning again in 100s...\n");
+	printk("Scanning again in 30s...\n");
 	k_work_schedule(&scan_retry_work, K_MSEC(RETRY_DELAY_MS));
 }
 
