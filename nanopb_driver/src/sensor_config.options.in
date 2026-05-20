@@ -1,1 +1,2 @@
 AllConfigs.configs max_count: @CONFIG_SENSOR_NUM@
+SensorConfig.mac_address max_size: @CONFIG_MAC_BYTES@ fixed_length : true

@@ -3,6 +3,7 @@ syntax = "proto3";
 import "nanopb.proto";
 
 message SensorConfig {
+    bytes mac_address = 1;
     bool automate = 2;
     int32 water_period = 3;
     int32 water_trigger = 4;

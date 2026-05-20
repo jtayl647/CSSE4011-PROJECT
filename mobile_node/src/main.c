@@ -22,22 +22,22 @@
 /* ==========================================================================
  * Sensor name filter list — add names here to connect to more nodes
  * ========================================================================== */
-static const char *const target_names[] = {
-	"SensorNode",
-	/* "SensorNode2", */
-	/* "GardenNode",  */
-};
+char* SENSOR_NAME = "SensorNode";
+char* BASE_NAME = "BaseNode";
 
-static bool name_in_list(const uint8_t *data, uint8_t data_len)
-{
-	for (int i = 0; i < ARRAY_SIZE(target_names); i++) {
-		if (data_len == strlen(target_names[i]) &&
-		    memcmp(data, target_names[i], data_len) == 0) {
-			return true;
-		}
-	}
-	return false;
-}
+bool sensor_seen = false;
+bool base_seen = false;
+
+// static bool name_sensor(const uint8_t *data, uint8_t data_len)
+// {
+// 	for (int i = 0; i < ARRAY_SIZE(target_names); i++) {
+// 		if (data_len == strlen(target_names[i]) &&
+// 		    memcmp(data, target_names[i], data_len) == 0) {
+// 			return true;
+// 		}
+// 	}
+// 	return false;
+// }
 
 static struct bt_conn *default_conn;
 
@@ -318,24 +318,31 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 
 	struct net_buf_simple_state state;
 	net_buf_simple_save(buf, &state);
-	bool found = false;
+	sensor_seen = false;
+	base_seen = false;
 
 	while (buf->len > 1) {
 		uint8_t len = net_buf_simple_pull_u8(buf);
 		if (!len || len > buf->len) break;
 		uint8_t ad_type = net_buf_simple_pull_u8(buf);
 		if ((ad_type == BT_DATA_NAME_COMPLETE ||
-		     ad_type == BT_DATA_NAME_SHORTENED) &&
-		    name_in_list(buf->data, len - 1)) {
-			found = true;
-			break;
+		    ad_type == BT_DATA_NAME_SHORTENED)) {
+			int data_len = len - 1;
+			if (data_len == strlen(SENSOR_NAME) &&
+				memcmp(buf->data, SENSOR_NAME, data_len) == 0) {
+				sensor_seen = true;
+			}
+			if (data_len == strlen(BASE_NAME) &&
+				memcmp(buf->data, BASE_NAME, data_len) == 0) {
+				base_seen = true;
+			}
 		}
 		net_buf_simple_pull(buf, len - 1);
 	}
 
 	net_buf_simple_restore(buf, &state);
 
-	if (!found) {
+	if (!base_seen || !sensor_seen) {
 		return;
 	}
 

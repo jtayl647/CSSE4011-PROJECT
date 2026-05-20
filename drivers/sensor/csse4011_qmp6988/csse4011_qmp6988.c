@@ -43,7 +43,7 @@ struct qmp6988_calib {
 
 struct qmp6988_data {
 	struct qmp6988_calib calib;
-	int32_t last_temp_cdeg;   /* centi-°C  — e.g. 25.00 °C → 2500 */
+	int32_t last_temp_cdeg;   /* centi-°C  — e.g. 25.00 °C -> 2500 */
 	int32_t last_press_pa;    /* Pascals   — e.g. 101325           */
 };
 
@@ -51,7 +51,7 @@ struct qmp6988_config {
 	struct i2c_dt_spec i2c;
 };
 
-/* ── Calibration parsing (datasheet §4.3) ────────────────────────── */
+/* ── Calibration parsing (datasheet 4.3) ────────────────────────── */
 /*
  * The OTP block is read as 25 bytes starting at 0xA0 (through 0xB8).
  * Register layout:
@@ -110,7 +110,7 @@ static void qmp6988_parse_calib(const uint8_t *d, struct qmp6988_calib *c)
 	}
 	c->a0 = (float)raw_a0 / 16.0f;
 
-	/* 16-bit coefficients: coeff = raw * S / 32767 + K  (datasheet §4.3 table) */
+	/* 16-bit coefficients: coeff = raw * S / 32767 + K  (datasheet 4.3 table)  */
 	/*                                       S                   K              */
 	c->bt1 = (float)RAW16( 2,  3) *  9.1E-2f  / 32767.0f +  1.0E-1f;
 	c->bt2 = (float)RAW16( 4,  5) *  1.2E-6f  / 32767.0f +  1.2E-8f;
@@ -219,13 +219,13 @@ static int qmp6988_channel_get(const struct device *dev,
 
 	switch (chan) {
 	case SENSOR_CHAN_AMBIENT_TEMP:
-		/* centi-°C → sensor_value (e.g. 2521 → val1=25, val2=210000) */
+		/* centi-°C -> sensor_value (e.g. 2521 -> val1=25, val2=210000) */
 		val->val1 = data->last_temp_cdeg / 100;
 		val->val2 = (data->last_temp_cdeg % 100) * 10000;
 		break;
 
 	case SENSOR_CHAN_PRESS:
-		/* Pa → kPa in sensor_value (e.g. 101325 Pa → val1=101, val2=325000) */
+		/* Pa -> kPa in sensor_value (e.g. 101325 Pa -> val1=101, val2=325000) */
 		val->val1 = data->last_press_pa / 1000;
 		val->val2 = (data->last_press_pa % 1000) * 1000;
 		break;
