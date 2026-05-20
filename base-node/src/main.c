@@ -1,7 +1,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/addr.h>
+#include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/sys/slist.h>
 #include <string.h>
 #include <stdlib.h>
@@ -245,6 +248,91 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sensor,
 
 SHELL_CMD_REGISTER(sensor, &sub_sensor, "Sensor node management", NULL);
 
+
+/* ==========================================================================
+ * NUS RX Callback
+ * ========================================================================== */
+static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
+			 void *ctx)
+{
+	printk("got some shit.\n");
+}
+
+static void nus_notif_enabled(bool enabled, void *ctx)
+{
+	if (!enabled) {
+		return;
+	}
+
+	printk("Mobile subscribed - sending sensor data\n");
+	const char *test = "hello from base!\n";
+
+	int err = bt_nus_send(NULL, test, strlen(test));
+	if (err) {
+		printk("Send failed (err %d)\n", err);
+	} else {
+		printk("Sent %d bytes\n", (int)strlen(test));
+	}
+}
+
+/* ==========================================================================
+ * BLE
+ * ========================================================================== */
+#define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
+#define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
+
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_SRV_VAL),
+};
+
+static struct bt_nus_cb nus_cb = {
+	.received      = nus_received,
+	.notif_enabled = nus_notif_enabled,
+};
+
+/* ==========================================================================
+ * Advertising restart work
+ * ========================================================================== */
+static void adv_restart_work_fn(struct k_work *work)
+{
+	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		printk("Failed to restart advertising (err %d)\n", err);
+	} else {
+		printk("Advertising restarted, waiting for mobile...\n");
+	}
+}
+
+static K_WORK_DELAYABLE_DEFINE(adv_restart_work, adv_restart_work_fn);
+
+/* ==========================================================================
+ * Connection Callbacks
+ * ========================================================================== */
+static void connected(struct bt_conn *conn, uint8_t err)
+{
+	if (err) {
+		LOG_ERR("Connection failed (err %d)", err);
+		return;
+	}
+	printk("Mobile connected, waiting for subscription...\n");
+}
+
+static void disconnected(struct bt_conn *conn, uint8_t reason)
+{
+	printk("Disconnected (reason 0x%02x) - restarting advertising in 1s...\n", reason);
+	k_work_schedule(&adv_restart_work, K_MSEC(1000));
+}
+
+BT_CONN_CB_DEFINE(conn_callbacks) = {
+	.connected    = connected,
+	.disconnected = disconnected,
+};
+
 /* ==========================================================================
  * Main
  * ========================================================================== */
@@ -255,6 +343,28 @@ int main(void)
 	sys_slist_init(&sensor_ll);
 
 	printk("Ready — use 'sensor add' to register sensors\n");
+
+	int err = bt_nus_cb_register(&nus_cb, NULL);
+	if (err) {
+		printk("Failed to register NUS callbacks: %d\n", err);
+		return err;
+	}
+
+	err = bt_enable(NULL);
+	if (err) {
+		printk("Failed to enable bluetooth: %d\n", err);
+		return err;
+	}
+
+	k_sleep(K_SECONDS(3));
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		printk("Failed to start advertising: %d\n", err);
+		return err;
+	}
+
+	LOG_INF("Base node advertising, waiting for mobile...");
 
 	while (1) {
 		k_sleep(K_FOREVER);

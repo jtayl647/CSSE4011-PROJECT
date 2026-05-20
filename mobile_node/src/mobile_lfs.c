@@ -92,6 +92,8 @@ int file_init(void* mp, void* file, char* filename, char* filepath) {
     //put the path name created into the pointer for the path name in outside world
     snprintf(filepath, MAX_PATH_LEN, "%s", path);
 
+    rc = fs_close(doc);
+
     return 0;
 
 
