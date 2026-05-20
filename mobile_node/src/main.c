@@ -15,29 +15,77 @@
 #include "mobile_pb.h"
 #include "nanopb_types.h"
 #include "mobile_lfs.h"
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/littlefs.h>
+#include <zephyr/storage/flash_map.h>
+
+LOG_MODULE_REGISTER(mobile_node, LOG_LEVEL_INF);
 
 #define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 
+static const char* SENSOR_NAME = "SensorNode";
+static const char* BASE_NAME = "BaseNode";
+
+static bool sensor_seen = false;
+static bool base_seen = false;
+
+//Struct which represents the LittleFS architecture
+FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(storage);
+static struct fs_mount_t lfs_storage_mnt = {
+	.type = FS_LITTLEFS,
+	.fs_data = &storage,
+	.storage_dev = (void *)FIXED_PARTITION_ID(storage_partition),
+	.mnt_point = "/lfs",
+};
+
+//Global pointer to the mountpoint
+struct fs_mount_t *mountpoint = &lfs_storage_mnt;
+
+//name of the file that past readings are being stored in
+static const char *sensor_nodes = "sensor_readings.txt";
+
+//name of the file that configs are being stored in
+static const char *sensor_configs = "sensor_configs.txt";
+
+//Full path of the file where past readings are being stored
+static char sensor_nodes_path[MAX_PATH_LEN];
+
+//Full path of the file where sensor configurations are saved
+static char sensor_configs_path[MAX_PATH_LEN];
+
+//File where past readings are being stored
+static struct fs_file_t sensor_nodes_file;
+
+//File where sensor configurations are being stored
+static struct fs_file_t sensor_configs_file;
+
+//Mutex to protect writing and reading to the sensor nodes file
+K_MUTEX_DEFINE(sensor_node_file_mutex);
+
+//Mutex to protect writing and reading to the configs file
+K_MUTEX_DEFINE(sensor_configs_file_mutex);
+
+
 /* ==========================================================================
  * Sensor name filter list — add names here to connect to more nodes
  * ========================================================================== */
-char* SENSOR_NAME = "SensorNode";
-char* BASE_NAME = "BaseNode";
+static const char *const target_names[] = {
+	"SensorNode",
+	/* "SensorNode2", */
+	/* "GardenNode",  */
+};
 
-bool sensor_seen = false;
-bool base_seen = false;
-
-// static bool name_sensor(const uint8_t *data, uint8_t data_len)
-// {
-// 	for (int i = 0; i < ARRAY_SIZE(target_names); i++) {
-// 		if (data_len == strlen(target_names[i]) &&
-// 		    memcmp(data, target_names[i], data_len) == 0) {
-// 			return true;
-// 		}
-// 	}
-// 	return false;
-// }
+static bool name_in_list(const uint8_t *data, uint8_t data_len)
+{
+	for (int i = 0; i < ARRAY_SIZE(target_names); i++) {
+		if (data_len == strlen(target_names[i]) &&
+		    memcmp(data, target_names[i], data_len) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 static struct bt_conn *default_conn;
 
@@ -105,34 +153,91 @@ static uint8_t notify_func(struct bt_conn *conn,
 			   struct bt_gatt_subscribe_params *params,
 			   const void *data, uint16_t length)
 {
+	printk("In the notify function\n");
 	if (!data) {
-		printk("Unsubscribed\n");
+		LOG_INF("Unsubscribed\n");
 		return BT_GATT_ITER_STOP;
 	}
 
-	/* --- decode incoming SensorNode --- */
-	SensorNode node = SensorNode_init_zero;
-	int ret = mobile_decode((uint8_t *)data, length, SENSOR_NODE, &node);
-	if (ret == 0) {
-		printk("MAC: %02x:%02x:%02x:%02x:%02x:%02x  ble_time=%d ms\n",
-		       node.mac_address[5], node.mac_address[4],
-		       node.mac_address[3], node.mac_address[2],
-		       node.mac_address[1], node.mac_address[0],
-		       node.ble_time);
+	int ret;
 
-		for (int i = 0; i < node.readings_count; i++) {
-			DataReadings *r = &node.readings[i];
-			printk("[%d] temp=%d.%02d humidity=%d moisture=%d pressure=%d.%02d meas_time=%d ms\n",
-			       i,
-			       r->temp / 100, r->temp % 100,
-			       r->humidity,
-			       r->moisture,
-			       r->pressure / 100, r->pressure % 100,
-			       r->meas_time);
+	if (sensor_seen) {
+		/* --- decode incoming SensorNode --- */
+		SensorNode node = SensorNode_init_zero;
+		ret = mobile_decode((uint8_t *)data, length, SENSOR_NODE, &node);
+		if (ret == 0) {
+
+
+			LOG_INF("MAC: %02x:%02x:%02x:%02x:%02x:%02x  ble_time=%d ms\n",
+				node.mac_address[5], node.mac_address[4],
+				node.mac_address[3], node.mac_address[2],
+				node.mac_address[1], node.mac_address[0],
+				node.ble_time);
+
+			for (int i = 0; i < node.readings_count; i++) {
+				DataReadings *r = &node.readings[i];
+				LOG_INF("[%d] temp=%d.%02d humidity=%d moisture=%d pressure=%d.%02d meas_time=%d ms\n",
+					i,
+					r->temp / 100, r->temp % 100,
+					r->humidity,
+					r->moisture,
+					r->pressure / 100, r->pressure % 100,
+					r->meas_time);
+				}
+		} else {
+			LOG_INF("Failed to decode SensorNode\n");
 		}
-	} else {
-		printk("Failed to decode SensorNode\n");
+
+		//Try writing the SensorNode to a file
+		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
+		ret = mobile_lfs_write_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &node);
+		if (ret < 0) {
+			LOG_ERR("Failed to write properly to the Sensor Readings file\n");
+		}
+		k_mutex_unlock(&sensor_node_file_mutex);
+
+		//instantly try and read what I just wrote
+		Nodes nodes = Nodes_init_zero;
+		//Try reading the file that I just wrote to
+		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
+		ret = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &nodes);
+		if (ret < 0) {
+			LOG_ERR("Failed to read properly from the sensor file\n");
+		}
+		k_mutex_unlock(&sensor_node_file_mutex);
+
+		//testing what is in Nodes
+		int sensor_num = nodes.nodes_count;
+		LOG_INF("Number of sensors read from file: %d\n", sensor_num);
+
+		for (int i = 0; i < sensor_num; i++) {
+			//grab the current sensor node
+			SensorNode node = nodes.nodes[i];
+			//print the mac address of the node gotten
+			LOG_INF("MAC Adress Read from file: %d:%d:%d:%d:%d:%d",
+				node.mac_address[0],
+				node.mac_address[1],
+				node.mac_address[2],
+				node.mac_address[3],
+				node.mac_address[4],
+				node.mac_address[5]
+			);
+			LOG_INF("BLE time read: %d\n", node.ble_time);
+			//grab the number of readings for this node
+			int num_readings = node.readings_count;
+
+			for (int j = 0; j < num_readings; j++) {
+				DataReadings data = node.readings[j];
+				LOG_INF("temp read: %d\n", data.temp);
+				LOG_INF("humidity read: %d\n", data.humidity);
+				LOG_INF("pressure read: %d\n", data.pressure);
+				LOG_INF("moisture read: %d\n", data.moisture);
+				LOG_INF("meas_time read: %d\n", data.meas_time);
+			}
+		}
+
 	}
+	////////////// Testing for writing to the SensorReadings file ////////////
 
 	if (nus_rx_handle == 0) {
 		printk("RX handle not ready, disconnecting\n");
@@ -331,6 +436,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 			if (data_len == strlen(SENSOR_NAME) &&
 				memcmp(buf->data, SENSOR_NAME, data_len) == 0) {
 				sensor_seen = true;
+				LOG_INF("Sensor Type Detected\n");
 			}
 			if (data_len == strlen(BASE_NAME) &&
 				memcmp(buf->data, BASE_NAME, data_len) == 0) {
@@ -342,7 +448,8 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 
 	net_buf_simple_restore(buf, &state);
 
-	if (!base_seen || !sensor_seen) {
+	if (!base_seen && !sensor_seen) {
+		//LOG_INF("In suspicious return block\n");
 		return;
 	}
 
@@ -448,6 +555,27 @@ int main(void)
 	}
 
 	k_sleep(K_SECONDS(3));
+
+	//Initialise the LittleFS architecture
+	err = mobile_lfs_init(mountpoint);
+	if (err < 0) {
+		LOG_ERR("Failed to mount the Mobile Node LittleFS\n");
+		return err;
+	}
+
+	//Initialise the configs file
+	err = mobile_lfs_file_init(mountpoint, &sensor_configs_file, sensor_configs, sensor_configs_path);
+	if (err < 0) {
+		LOG_ERR("Failed to init the %s\n", sensor_configs);
+		return err;
+	}
+
+	//initialise the readings file
+	err = mobile_lfs_file_init(mountpoint, &sensor_nodes_file, sensor_nodes, sensor_nodes_path);
+	if (err < 0) {
+		LOG_ERR("Failed to init the %s\n", sensor_nodes);
+		return err;
+	}
 
 	printk("Mobile node started\n");
 
