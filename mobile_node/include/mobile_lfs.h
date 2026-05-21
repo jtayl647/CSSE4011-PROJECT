@@ -7,7 +7,7 @@
 #define READINGS_CSV_LINE_LENGTH 86
 
 int mobile_lfs_init(void* mp);
-int mobile_lfs_file_init(void* mp, void* file, char* filename, char* filepath);
+int file_init(void* mp, void* file, char* filename, char* filepath);
 int mobile_lfs_config_write(void* cf, char* path, void* all_cnfgs);
 int mobile_lfs_config_read(void* cf, char* path, void* mac_buf, void* dest_config);
 int mobile_lfs_write_sensor_readings(void* rf, char* path, void* sensor_node);

@@ -62,7 +62,7 @@ int mobile_lfs_init(void* mp) {
  * @return 0 if successful, -1 if unsuccessful
  ============================================================================================*/
 
-int mobile_lfs_file_init(void* mp, void* file, char* filename, char* filepath) {
+int file_init(void* mp, void* file, char* filename, char* filepath) {
     
     int rc;
 
