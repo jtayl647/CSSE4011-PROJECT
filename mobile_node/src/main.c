@@ -87,6 +87,16 @@ struct SensorTx {
 	uint16_t length;
 };
 
+struct BaseRx {
+	uint8_t encoded[255];
+	uint16_t length;
+};
+
+struct BaseTx {
+	uint8_t encoded[255];
+	uint16_t length;
+};
+
 K_MSGQ_DEFINE(readings_writing_msgq,
               sizeof(struct SensorRx),
               4,
@@ -97,8 +107,13 @@ K_MSGQ_DEFINE(config_read_msgq,
               4,
               4);
 
-K_MSGQ_DEFINE(sensor_config_send_msgq,
+K_MSGQ_DEFINE(sensor_config_read_msgq,
               sizeof(struct SensorTx),
+              4,
+              4);
+
+K_MSGQ_DEFINE(sensor_config_write_msgq,
+              sizeof(struct BaseRx),
               4,
               4);
 
@@ -261,6 +276,34 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 		//mutex lock the config file
 		k_mutex_lock(&sensor_configs_file_mutex, K_FOREVER);
 
+		//write a bullshit message to the file for config testing
+
+		//make a fake struct of configs
+		// AllConfigs all_configs = AllConfigs_init_zero;
+
+		//add a legitimate config struct to the collection
+		//copy the mac address
+		// memcpy(all_configs.configs[all_configs.configs_count].mac_address, config.mac_address, CONFIG_MAC_BYTES);
+		// all_configs.configs[all_configs.configs_count].automate = true;
+		// all_configs.configs[all_configs.configs_count].water_period = 55;
+		// all_configs.configs[all_configs.configs_count].water_trigger = 30;
+		// all_configs.configs_count++;
+
+		// //make a bullshit struct
+		// uint8_t fake_mac[CONFIG_MAC_BYTES] = {120, 230, 598, 110, 56, 98};
+		// memcpy(all_configs.configs[all_configs.configs_count].mac_address, fake_mac, CONFIG_MAC_BYTES);
+		// all_configs.configs[all_configs.configs_count].automate = false;
+		// all_configs.configs[all_configs.configs_count].water_period = 100;
+		// all_configs.configs[all_configs.configs_count].water_trigger = 90;
+		// all_configs.configs_count++;
+
+		//write this config struct to the configs file
+		// ret = mobile_lfs_config_write(&sensor_configs_file, sensor_configs_path, &all_configs);
+		// if (ret < 0) {
+		// 	printk("Something went wrong when writing to %s\n", sensor_configs_path);
+		// }
+
+
 		//read fom the configs file
 		ret = mobile_lfs_config_read(&sensor_configs_file, sensor_configs_path, config.mac_address, &config);
 		if (ret < 0) {
@@ -287,7 +330,7 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 		memcpy(sensor_tx.encoded, config_buf, config_buf_len);
 
 		//now put the transmission struct into the queue
-		ret = k_msgq_put(&sensor_config_send_msgq, &sensor_tx, K_NO_WAIT);
+		ret = k_msgq_put(&sensor_config_read_msgq, &sensor_tx, K_NO_WAIT);
 		if (ret < 0) {
 			printk("Message Queue sending config buffer to BLE callback failed\n");
 		}
@@ -299,6 +342,44 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 K_THREAD_DEFINE(configs_file_read_thread, FILE_WRITE_THREAD_STACK,
 		configs_file_read_thread_fn, NULL, NULL, NULL,
 		FILE_WRITE_THREAD_PRIO, 0, 0);
+
+
+static void configs_file_write_thread_fn(void *a, void *b, void *c) {
+
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+
+	struct BaseRx base_rx;
+	int ret;
+
+	while(1) {
+		//wait on the queue that is sending a received base message
+		k_msgq_get(&readings_writing_msgq, &base_rx, K_FOREVER);
+
+		//we have now received the information, must decode into an AllCOnfigs Struct
+		AllConfigs all_configs = AllConfigs_init_zero;
+		ret = mobile_decode(base_rx.encoded, base_rx.length, ALL_CONFIGS, &all_configs);
+		if (ret < 0) {
+			printk("Something went wrong while decoding AllConfigs buffer sent from base\n");
+		}
+
+		k_mutex_lock(&sensor_configs_file_mutex, K_FOREVER);
+
+		//now write this to the configs file
+		//write this config struct to the configs file
+		ret = mobile_lfs_config_write(&sensor_configs_file, sensor_configs_path, &all_configs);
+		if (ret < 0) {
+			printk("Something went wrong when writing to %s\n", sensor_configs_path);
+		}
+		k_mutex_unlock(&sensor_configs_file_mutex);
+
+		k_sleep(K_MSEC(1));
+	}
+}
+
+K_THREAD_DEFINE(configs_file_write_thread, FILE_WRITE_THREAD_STACK,
+		configs_file_write_thread_fn, NULL, NULL, NULL,
+		FILE_WRITE_THREAD_PRIO, 0, 0);
+
 
 /* ------------------------------------------------------------------
  * Write callback — fires after sensor ACKs the config write.
@@ -354,7 +435,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 		struct SensorTx sensor_tx;
 		
-		k_msgq_get(&sensor_config_send_msgq, &sensor_tx, K_FOREVER);
+		k_msgq_get(&sensor_config_read_msgq, &sensor_tx, K_FOREVER);
 
 		printk("Received an encoded message to send back to sensor node\n");
 		
@@ -383,6 +464,29 @@ static uint8_t notify_func(struct bt_conn *conn,
 		printk("After the gatt write of the weird params stuff\n");
 		sensor_seen = false;
 	}
+
+	if (base_seen) {
+
+		//receive the config information for all sensors from the base
+		struct BaseRx base_rx;
+
+		//set the length of the buffer received
+		base_rx.length = length;
+		//copy the data from the received encoded packet to the struct
+		memcpy(base_rx.encoded, (uint8_t *)data, length);
+
+		//put the receied base struct into a queue to the config file writing thread
+		ret = k_msgq_put(&sensor_config_write_msgq, &base_rx, K_NO_WAIT);
+		if (ret != 0) {
+			printk("Queue to config file writing thread failed: %d\n", ret);
+		}
+
+		//we also now need to wait on a buffer of encoded Nodes information read from the readings file
+
+
+	}
+
+	
 
 	// if (nus_rx_handle == 0) {
 	// 	printk("RX handle not ready, disconnecting\n");
