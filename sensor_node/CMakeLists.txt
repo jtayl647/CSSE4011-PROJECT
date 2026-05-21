@@ -2,8 +2,13 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
-# Custom DTS bindings live inside this repo so it builds standalone
-list(APPEND DTS_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
+# Custom DTS bindings: add CSSE4011-PROJECT as DTS root only when building
+# standalone (outside the firmware west workspace). Inside the workspace,
+# firmware/dts/bindings/ is already on the search path — adding it again
+# causes a duplicate-compatible conflict.
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../dts/bindings")
+    list(APPEND DTS_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
 
 list(APPEND ZEPHYR_EXTRA_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/../drivers)
 
