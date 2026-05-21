@@ -1,5 +1,3 @@
-#include <sensor_config.pb.h>
-#include <sensor_info.pb.h>
 #include <pb_encode.h>
 #include <pb_decode.h>
 #include <string.h>
@@ -9,6 +7,8 @@
 #include "mobile_pb.h"
 #include <zephyr/kernel.h>
 #include "nanopb_types.h"
+#include <sensor_config.pb.h>
+#include <sensor_info.pb.h>
 
 static bool encode_sensor_config(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message);
 static bool encode_nodes(uint8_t *buffer, size_t buffer_size, size_t *message_length, void *message);
