@@ -157,6 +157,15 @@ static void scan_retry_work_fn(struct k_work *work)
 
 static K_WORK_DELAYABLE_DEFINE(scan_retry_work, scan_retry_work_fn);
 
+static void disconnect_work_fn(struct k_work *work)
+{
+	if (default_conn) {
+		bt_conn_disconnect(default_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	}
+}
+
+static K_WORK_DEFINE(disconnect_work, disconnect_work_fn);
+
 /* ==========================================================================
  * NUS TX Subscription + RX Write
  *
@@ -167,6 +176,11 @@ static K_WORK_DELAYABLE_DEFINE(scan_retry_work, scan_retry_work_fn);
  * On notification received:
  *   notify_func → bt_gatt_write(config) → write_done → bt_conn_disconnect
  * ========================================================================== */
+/* Buffer holding the last encoded Nodes to send to the base */
+static uint8_t  nodes_tx_buf[Nodes_size];
+static size_t   nodes_tx_len = 0;
+static bool     has_nodes_to_send = false;
+
 static struct bt_gatt_subscribe_params subscribe_params;
 static struct bt_gatt_discover_params  ccc_discover_params;
 static struct bt_gatt_discover_params  tx_discover_params;
@@ -176,7 +190,8 @@ static struct bt_uuid_128              rx_discover_uuid;
 static uint16_t                        nus_tx_handle;
 static uint16_t                        nus_rx_handle;
 static struct bt_gatt_exchange_params  exchange_params;
-static struct bt_gatt_write_params     write_params;
+static struct bt_gatt_write_params     sensor_write_params;
+static struct bt_gatt_write_params     base_write_params;
 
 /* Encoded config buffer — filled once in notify_func, sent in write_done */
 // static uint8_t config_buf[SensorConfig_size];
@@ -248,6 +263,16 @@ static void readings_file_write_thread_fn(void *a, void *b, void *c) {
 				printk("meas_time read: %d\n", data.meas_time);
 			}
 		}
+		/* Encode the full Nodes struct into the TX buffer for the base */
+		nodes_tx_len = 0;
+		ret = mobile_encode(nodes_tx_buf, sizeof(nodes_tx_buf), &nodes_tx_len, NODES, &nodes);
+		if (ret < 0) {
+			printk("Failed to encode Nodes for base TX\n");
+		} else {
+			has_nodes_to_send = true;
+			printk("Nodes encoded (%d bytes), ready to send to base\n", (int)nodes_tx_len);
+		}
+
 		k_sleep(K_MSEC(1));
 	}
 }
@@ -275,34 +300,6 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 
 		//mutex lock the config file
 		k_mutex_lock(&sensor_configs_file_mutex, K_FOREVER);
-
-		//write a bullshit message to the file for config testing
-
-		//make a fake struct of configs
-		// AllConfigs all_configs = AllConfigs_init_zero;
-
-		//add a legitimate config struct to the collection
-		//copy the mac address
-		// memcpy(all_configs.configs[all_configs.configs_count].mac_address, config.mac_address, CONFIG_MAC_BYTES);
-		// all_configs.configs[all_configs.configs_count].automate = true;
-		// all_configs.configs[all_configs.configs_count].water_period = 55;
-		// all_configs.configs[all_configs.configs_count].water_trigger = 30;
-		// all_configs.configs_count++;
-
-		// //make a bullshit struct
-		// uint8_t fake_mac[CONFIG_MAC_BYTES] = {120, 230, 598, 110, 56, 98};
-		// memcpy(all_configs.configs[all_configs.configs_count].mac_address, fake_mac, CONFIG_MAC_BYTES);
-		// all_configs.configs[all_configs.configs_count].automate = false;
-		// all_configs.configs[all_configs.configs_count].water_period = 100;
-		// all_configs.configs[all_configs.configs_count].water_trigger = 90;
-		// all_configs.configs_count++;
-
-		//write this config struct to the configs file
-		// ret = mobile_lfs_config_write(&sensor_configs_file, sensor_configs_path, &all_configs);
-		// if (ret < 0) {
-		// 	printk("Something went wrong when writing to %s\n", sensor_configs_path);
-		// }
-
 
 		//read fom the configs file
 		ret = mobile_lfs_config_read(&sensor_configs_file, sensor_configs_path, config.mac_address, &config);
@@ -353,7 +350,7 @@ static void configs_file_write_thread_fn(void *a, void *b, void *c) {
 
 	while(1) {
 		//wait on the queue that is sending a received base message
-		k_msgq_get(&readings_writing_msgq, &base_rx, K_FOREVER);
+		k_msgq_get(&sensor_config_write_msgq, &base_rx, K_FOREVER);
 
 		//we have now received the information, must decode into an AllCOnfigs Struct
 		AllConfigs all_configs = AllConfigs_init_zero;
@@ -405,11 +402,11 @@ static uint8_t notify_func(struct bt_conn *conn,
 			   struct bt_gatt_subscribe_params *params,
 			   const void *data, uint16_t length)
 {
-	//printk("In the notify function\n");
 	if (!data) {
-		printk("Unsubscribed\n");
 		return BT_GATT_ITER_STOP;
 	}
+
+	printk("In the notify function\n");
 
 	int ret;
 
@@ -439,7 +436,6 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 		printk("Received an encoded message to send back to sensor node\n");
 		
-
 		if (nus_rx_handle == 0) {
 			printk("RX handle not ready, disconnecting\n");
 			bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
@@ -448,15 +444,15 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 		printk("Before the weird params stuff\n");
 		/* Write config to sensor RX; disconnect in write_done */
-		write_params.func   = write_done;
-		write_params.handle = nus_rx_handle;
-		write_params.offset = 0;
-		write_params.data   = sensor_tx.encoded;
-		write_params.length = sensor_tx.length;
+		sensor_write_params.func   = write_done;
+		sensor_write_params.handle = nus_rx_handle;
+		sensor_write_params.offset = 0;
+		sensor_write_params.data   = sensor_tx.encoded;
+		sensor_write_params.length = sensor_tx.length;
 		printk("After the weird params stuff\n");
 
 		printk("Before the gatt write of my weird params stuff\n");
-		int err = bt_gatt_write(conn, &write_params);
+		int err = bt_gatt_write(conn, &sensor_write_params);
 		if (err) {
 			printk("Config write failed (err %d), disconnecting\n", err);
 			bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
@@ -466,63 +462,36 @@ static uint8_t notify_func(struct bt_conn *conn,
 	}
 
 	if (base_seen) {
-
-		//receive the config information for all sensors from the base
+		/* Store incoming AllConfigs */
 		struct BaseRx base_rx;
-
-		//set the length of the buffer received
 		base_rx.length = length;
-		//copy the data from the received encoded packet to the struct
 		memcpy(base_rx.encoded, (uint8_t *)data, length);
-
-		//put the receied base struct into a queue to the config file writing thread
 		ret = k_msgq_put(&sensor_config_write_msgq, &base_rx, K_NO_WAIT);
 		if (ret != 0) {
-			printk("Queue to config file writing thread failed: %d\n", ret);
+			printk("queue failed: %d\n", ret);
 		}
+		base_seen = false;
 
-		//we also now need to wait on a buffer of encoded Nodes information read from the readings file
-
-
+		/* If we have readings, send them to the base now */
+		if (has_nodes_to_send && nus_rx_handle != 0) {
+			printk("Sending Nodes to base (%d bytes)\n", (int)nodes_tx_len);
+			base_write_params.func   = write_done;
+			base_write_params.handle = nus_rx_handle;
+			base_write_params.offset = 0;
+			base_write_params.data   = nodes_tx_buf;
+			base_write_params.length = nodes_tx_len;
+			int err = bt_gatt_write(conn, &base_write_params);
+			if (err) {
+				printk("Nodes write failed (err %d)\n", err);
+				k_work_submit(&disconnect_work);
+			} else {
+				has_nodes_to_send = false;
+			}
+		} else {
+			k_work_submit(&disconnect_work);
+		}
+		return BT_GATT_ITER_STOP;
 	}
-
-	
-
-	// if (nus_rx_handle == 0) {
-	// 	printk("RX handle not ready, disconnecting\n");
-	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	// 	return BT_GATT_ITER_STOP;
-	// }
-
-	// /* --- encode a test SensorConfig to send back --- */
-	// SensorConfig config = SensorConfig_init_zero;
-	// config.automate      = true;
-	// config.water_period  = 10;   /* seconds */
-	// config.water_trigger = 90;   /* moisture % threshold */
-
-	// config_buf_len = 0;
-	// ret = mobile_encode(config_buf, sizeof(config_buf),
-	// 		    &config_buf_len, SENSOR_CONFIG, &config);
-	// if (ret != 0) {
-	// 	printk("Failed to encode SensorConfig\n");
-	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	// 	return BT_GATT_ITER_STOP;
-	// }
-
-	// /* Write config to sensor RX; disconnect in write_done */
-	// write_params.func   = write_done;
-	// write_params.handle = nus_rx_handle;
-	// write_params.offset = 0;
-	// write_params.data   = config_buf;
-	// write_params.length = config_buf_len;
-
-	// int err = bt_gatt_write(conn, &write_params);
-	// if (err) {
-	// 	printk("Config write failed (err %d), disconnecting\n", err);
-	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-	// }
-
-	// sensor_seen = false;
 
 	printk("At the end of the connection callback\n");
 
@@ -702,13 +671,12 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi,
 	net_buf_simple_restore(buf, &state);
 
 	if (!base_seen && !sensor_seen) {
-		//LOG_INF("In suspicious return block\n");
 		return;
 	}
 
 	char addr_str[BT_ADDR_LE_STR_LEN];
 	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-	printk("Found sensor node [%s] RSSI=%d — connecting...\n", addr_str, rssi);
+	printk("Found sensor or base node [%s] RSSI=%d — connecting...\n", addr_str, rssi);
 
 	bt_le_scan_stop();
 
@@ -771,16 +739,29 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 }
 
+// static void disconnected(struct bt_conn *conn, uint8_t reason)
+// {
+// 	char addr[BT_ADDR_LE_STR_LEN];
+// 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+// 	printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
+
+// 	if (default_conn != conn) {
+// 		return;
+// 	}
+
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	char addr[BT_ADDR_LE_STR_LEN];
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+    char addr[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
+    printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
+    printk("default_conn=%p  conn=%p\n", (void*)default_conn, (void*)conn);  // add this
 
-	if (default_conn != conn) {
-		return;
-	}
+    if (default_conn != conn) {
+        printk("Early return - conn mismatch\n");
+        return;
+    }
 
 	bt_conn_unref(default_conn);
 	default_conn  = NULL;
@@ -828,6 +809,21 @@ int main(void)
 	if (err < 0) {
 		printk("Failed to init the %s\n", sensor_nodes);
 		return err;
+	}
+
+	/* If the readings file already has data from a previous run, encode it
+	 * into the TX buffer so it gets sent to the base on the next visit. */
+	Nodes boot_nodes = Nodes_init_zero;
+	err = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &boot_nodes);
+	if (err >= 0 && boot_nodes.nodes_count > 0) {
+		nodes_tx_len = 0;
+		int enc_err = mobile_encode(nodes_tx_buf, sizeof(nodes_tx_buf),
+					    &nodes_tx_len, NODES, &boot_nodes);
+		if (enc_err == 0) {
+			has_nodes_to_send = true;
+			printk("Loaded %d node(s) from file, ready to send to base\n",
+			       boot_nodes.nodes_count);
+		}
 	}
 
 	printk("Mobile node started\n");
