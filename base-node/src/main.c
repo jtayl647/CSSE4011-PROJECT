@@ -251,11 +251,25 @@ SHELL_CMD_REGISTER(sensor, &sub_sensor, "Sensor node management", NULL);
 
 /* ==========================================================================
  * NUS RX Callback
+ *
+ * Mobile (data mule) sends all collected sensor readings as plain-text lines,
+ * then "END". On receiving "END" the base replies with all stored sensor
+ * configs (one line per sensor) then its own "END".
+ *
+ * Incoming reading line format:
+ *   AABBCCDDEEFF,BLE_TIME,TEMP,HUMIDITY,PRESSURE,MOISTURE,MEAS_TIME
+ *
+ * Outgoing config line format:
+ *   NAME,AABBCCDDEEFF,AUTOMATE,PERIOD,TRIGGER
  * ========================================================================== */
 static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 			 void *ctx)
 {
-	printk("got some shit.\n");
+	/* Print whatever the mobile sends — decoding to be added later */
+	char buf[len + 1];
+	memcpy(buf, data, len);
+	buf[len] = '\0';
+	printk("RX from mobile (%d bytes): %s\n", len, buf);
 }
 
 static void nus_notif_enabled(bool enabled, void *ctx)
@@ -264,15 +278,7 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 		return;
 	}
 
-	printk("Mobile subscribed - sending sensor data\n");
-	const char *test = "hello from base!\n";
-
-	int err = bt_nus_send(NULL, test, strlen(test));
-	if (err) {
-		printk("Send failed (err %d)\n", err);
-	} else {
-		printk("Sent %d bytes\n", (int)strlen(test));
-	}
+	printk("Mobile connected via NUS\n");
 }
 
 /* ==========================================================================
