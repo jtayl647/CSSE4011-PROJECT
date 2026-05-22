@@ -2,8 +2,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/conn.h>
-#include <zephyr/bluetooth/addr.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/sys/slist.h>
 #include <string.h>
@@ -11,6 +13,7 @@
 #include <sensor_config.pb.h>
 #include <sensor_info.pb.h>
 #include "nanopb_types.h"
+#include "base_pb.h"
 
 LOG_MODULE_REGISTER(base_node, LOG_LEVEL_INF);
 
@@ -29,6 +32,16 @@ LOG_MODULE_REGISTER(base_node, LOG_LEVEL_INF);
  *   sensor list
  * ========================================================================== */
 #define MAX_SENSORS CONFIG_SENSOR_NUM
+#define SENSOR_DECOMP_STACK 2*4096
+#define SENSOR_DECOMP_PRIO 6
+static const char* MOBILE_NAME = "MobileNode";
+static bool mobile_seen = false;
+
+
+struct MobileRx {
+	uint8_t encoded[255];
+	uint16_t length;
+};
 
 struct sensor_entry {
 	char         name[32];
@@ -49,6 +62,60 @@ static bool                   slot_used[MAX_SENSORS];
 /* The linked list and its mutex */
 static sys_slist_t sensor_ll;
 K_MUTEX_DEFINE(sensor_ll_mutex);
+
+
+K_MSGQ_DEFINE(sensors_decomp_msgq,
+              sizeof(struct MobileRx),
+              4,
+              4);
+
+
+
+static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
+
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+
+	struct MobileRx mobile_rx;
+	int ret;
+
+	while(1) {
+		printk("Waiting to receive AllNodes struct\n");
+		//wait on a queue on received data from the mobile node
+		k_msgq_get(&sensors_decomp_msgq, &mobile_rx, K_FOREVER);
+		printk("AllNodes struct buffer received!\n");
+		//we now have information passed to us, we need to decode the Nodes struct
+		Nodes nodes = Nodes_init_zero;
+
+		ret = base_decode(mobile_rx.encoded, mobile_rx.length, NODES, &nodes);
+		if (ret < 0) {
+			printk("Error, issue with decoding Nodes struct coming from mobile node\n");
+		}
+
+		//now we loop through the nodes struct to see what we've got
+		for (int i = 0; i < nodes.nodes_count; i++) {
+			//grab the node we are at
+			SensorNode current_node = nodes.nodes[i];
+			printk("MAC: {%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX} BLE_time: {%d}\n", 
+				current_node.mac_address[0], current_node.mac_address[1],
+				current_node.mac_address[2], current_node.mac_address[3],
+				current_node.mac_address[4], current_node.mac_address[5],
+				current_node.ble_time);
+			for (int j = 0; j < current_node.readings_count; j++) {
+				//retrieve the readings 
+				DataReadings reading = current_node.readings[j];
+				printk("Temp: {%d} Humidity: {%d} Pressure: {%d} Moisture: {%d} Meas_time: {%d}\n", 
+					reading.temp, reading.humidity, reading.pressure, reading.moisture,
+					reading.meas_time);
+			}
+		}
+
+		k_sleep(K_MSEC(1));
+	}
+}
+
+K_THREAD_DEFINE(sensors_decomp_thread, SENSOR_DECOMP_STACK,
+		sensors_decomp_thread_fn, NULL, NULL, NULL,
+		SENSOR_DECOMP_PRIO, 0, 0);
 
 /* ==========================================================================
  * Internal helpers
@@ -249,27 +316,433 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sensor,
 SHELL_CMD_REGISTER(sensor, &sub_sensor, "Sensor node management", NULL);
 
 
+
+/**
+ * MTU Exchange Nus
+ */
+
+// static struct bt_conn *default_conn;
+
+// #define RETRY_DELAY_MS 30000
+
+// /* Forward declarations */
+// static void start_scan(void);
+// static void discover_nus_tx(struct bt_conn *conn);
+// static void discover_nus_rx(struct bt_conn *conn);
+
+
+// static void scan_retry_work_fn(struct k_work *work)
+// {
+// 	printk("Retrying scan...\n");
+// 	start_scan();
+// }
+
+// static K_WORK_DELAYABLE_DEFINE(scan_retry_work, scan_retry_work_fn);
+
+// /* ==========================================================================
+//  * NUS TX Subscription + RX Write
+//  *
+//  * Discovery chain:
+//  *   MTU exchange → TX discover → CCC discover → subscribe
+//  *                             → RX discover → (ready to send config)
+//  *
+//  * On notification received:
+//  *   notify_func → bt_gatt_write(config) → write_done → bt_conn_disconnect
+//  * ========================================================================== */
+// static struct bt_gatt_subscribe_params subscribe_params;
+// static struct bt_gatt_discover_params  ccc_discover_params;
+// static struct bt_gatt_discover_params  tx_discover_params;
+// static struct bt_gatt_discover_params  rx_discover_params;
+// static struct bt_uuid_128              tx_discover_uuid;
+// static struct bt_uuid_128              rx_discover_uuid;
+// static uint16_t                        nus_tx_handle;
+// static uint16_t                        nus_rx_handle;
+// static struct bt_gatt_exchange_params  exchange_params;
+// static struct bt_gatt_write_params     write_params;
+
+// /* ------------------------------------------------------------------
+//  * Write callback — fires after sensor ACKs the config write.
+//  * ------------------------------------------------------------------ */
+// static void write_done(struct bt_conn *conn, uint8_t err,
+// 		       struct bt_gatt_write_params *params)
+// {
+// 	if (err) {
+// 		printk("Config write failed (err %d)\n", err);
+// 	} else {
+// 		printk("Config sent successfully\n");
+// 	}
+
+// 	printk("Disconnecting...\n");
+// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+// }
+
+// /* ------------------------------------------------------------------
+//  * Notification callback — decodes incoming SensorNode, then sends
+//  * an encoded SensorConfig back.
+//  * ------------------------------------------------------------------ */
+// static uint8_t notify_func(struct bt_conn *conn,
+// 			   struct bt_gatt_subscribe_params *params,
+// 			   const void *data, uint16_t length)
+// {
+// 	//printk("In the notify function\n");
+// 	if (!data) {
+// 		printk("Unsubscribed\n");
+// 		return BT_GATT_ITER_STOP;
+// 	}
+
+// 	int ret;
+
+//     if (mobile_seen) {
+
+
+//         printk("Mobile seen, yay!\n");
+
+        
+//         if (nus_rx_handle == 0) {
+//             printk("RX handle not ready, disconnecting\n");
+//             bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+//             return BT_GATT_ITER_STOP;
+//         }
+
+//         /* Write config to sensor RX; disconnect in write_done */
+//         write_params.func   = write_done;
+//         write_params.handle = nus_rx_handle;
+//         write_params.offset = 0;
+//         write_params.data   = "hi";
+//         write_params.length = 1;
+
+//         int err = bt_gatt_write(conn, &write_params);
+//         if (err) {
+//             printk("Config write failed (err %d), disconnecting\n", err);
+//             bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+//         }
+// 		mobile_seen = false;
+//     }
+// 	// if (nus_rx_handle == 0) {
+// 	// 	printk("RX handle not ready, disconnecting\n");
+// 	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+// 	// 	return BT_GATT_ITER_STOP;
+// 	// }
+
+// 	// /* --- encode a test SensorConfig to send back --- */
+// 	// SensorConfig config = SensorConfig_init_zero;
+// 	// config.automate      = true;
+// 	// config.water_period  = 10;   /* seconds */
+// 	// config.water_trigger = 90;   /* moisture % threshold */
+
+// 	// config_buf_len = 0;
+// 	// ret = mobile_encode(config_buf, sizeof(config_buf),
+// 	// 		    &config_buf_len, SENSOR_CONFIG, &config);
+// 	// if (ret != 0) {
+// 	// 	printk("Failed to encode SensorConfig\n");
+// 	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+// 	// 	return BT_GATT_ITER_STOP;
+// 	// }
+
+// 	// /* Write config to sensor RX; disconnect in write_done */
+// 	// write_params.func   = write_done;
+// 	// write_params.handle = nus_rx_handle;
+// 	// write_params.offset = 0;
+// 	// write_params.data   = config_buf;
+// 	// write_params.length = config_buf_len;
+
+// 	// int err = bt_gatt_write(conn, &write_params);
+// 	// if (err) {
+// 	// 	printk("Config write failed (err %d), disconnecting\n", err);
+// 	// 	bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+// 	// }
+
+// 	// sensor_seen = false;
+
+// 	printk("At the end of the connection callback\n");
+
+// 	return BT_GATT_ITER_STOP;
+// }
+
+// /* ------------------------------------------------------------------
+//  * CCC discovery — subscribe to TX notifications, then find RX handle
+//  * ------------------------------------------------------------------ */
+// static uint8_t ccc_discover_func(struct bt_conn *conn,
+// 				  const struct bt_gatt_attr *attr,
+// 				  struct bt_gatt_discover_params *params)
+// {
+// 	if (!attr) {
+// 		printk("CCC not found\n");
+// 		return BT_GATT_ITER_STOP;
+// 	}
+
+// 	subscribe_params.notify       = notify_func;
+// 	subscribe_params.value        = BT_GATT_CCC_NOTIFY;
+// 	subscribe_params.ccc_handle   = attr->handle;
+// 	subscribe_params.value_handle = nus_tx_handle;
+
+// 	int err = bt_gatt_subscribe(conn, &subscribe_params);
+// 	if (err && err != -EALREADY) {
+// 		printk("Subscribe failed (err %d)\n", err);
+// 	} else {
+// 		printk("Subscribed to sensor notifications\n");
+// 	}
+
+// 	return BT_GATT_ITER_STOP;
+// }
+
+// /* ------------------------------------------------------------------
+//  * TX characteristic discovery
+//  * ------------------------------------------------------------------ */
+// static uint8_t tx_discover_func(struct bt_conn *conn,
+// 				 const struct bt_gatt_attr *attr,
+// 				 struct bt_gatt_discover_params *params)
+// {
+// 	if (!attr) {
+// 		printk("NUS TX not found\n");
+// 		return BT_GATT_ITER_STOP;
+// 	}
+
+// 	nus_tx_handle = bt_gatt_attr_value_handle(attr);
+// 	printk("NUS TX handle: %u - discovering CCC...\n", nus_tx_handle);
+
+// 	static struct bt_uuid_16 ccc_uuid = BT_UUID_INIT_16(BT_UUID_GATT_CCC_VAL);
+
+// 	ccc_discover_params.uuid         = &ccc_uuid.uuid;
+// 	ccc_discover_params.func         = ccc_discover_func;
+// 	ccc_discover_params.start_handle = nus_tx_handle + 1;
+// 	ccc_discover_params.end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+// 	ccc_discover_params.type         = BT_GATT_DISCOVER_DESCRIPTOR;
+
+// 	int err = bt_gatt_discover(conn, &ccc_discover_params);
+// 	if (err) {
+// 		printk("CCC discover failed (err %d)\n", err);
+// 	}
+
+// 	return BT_GATT_ITER_STOP;
+// }
+
+// static void discover_nus_tx(struct bt_conn *conn)
+// {
+// 	memcpy(&tx_discover_uuid,
+// 	       BT_UUID_DECLARE_128(BT_UUID_NUS_TX_CHAR_VAL),
+// 	       sizeof(tx_discover_uuid));
+
+// 	tx_discover_params.uuid         = &tx_discover_uuid.uuid;
+// 	tx_discover_params.func         = tx_discover_func;
+// 	tx_discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+// 	tx_discover_params.end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+// 	tx_discover_params.type         = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+// 	int err = bt_gatt_discover(conn, &tx_discover_params);
+// 	if (err) {
+// 		printk("TX discover failed (err %d)\n", err);
+// 	}
+// }
+
+// /* ------------------------------------------------------------------
+//  * RX characteristic discovery — store handle, then kick off TX discovery
+//  * ------------------------------------------------------------------ */
+// static uint8_t rx_discover_func(struct bt_conn *conn,
+// 				 const struct bt_gatt_attr *attr,
+// 				 struct bt_gatt_discover_params *params)
+// {
+// 	if (!attr) {
+// 		printk("NUS RX not found\n");
+// 	} else {
+// 		nus_rx_handle = bt_gatt_attr_value_handle(attr);
+// 		printk("NUS RX handle: %u\n", nus_rx_handle);
+// 	}
+
+// 	/* Always continue to TX discovery regardless */
+// 	discover_nus_tx(conn);
+
+// 	return BT_GATT_ITER_STOP;
+// }
+
+// static void discover_nus_rx(struct bt_conn *conn)
+// {
+// 	memcpy(&rx_discover_uuid,
+// 	       BT_UUID_DECLARE_128(BT_UUID_NUS_RX_CHAR_VAL),
+// 	       sizeof(rx_discover_uuid));
+
+// 	rx_discover_params.uuid         = &rx_discover_uuid.uuid;
+// 	rx_discover_params.func         = rx_discover_func;
+// 	rx_discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+// 	rx_discover_params.end_handle   = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+// 	rx_discover_params.type         = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+// 	int err = bt_gatt_discover(conn, &rx_discover_params);
+// 	if (err) {
+// 		printk("RX discover failed (err %d), trying TX anyway\n", err);
+// 		discover_nus_tx(conn);
+// 	}
+// }
+
+// /* ------------------------------------------------------------------
+//  * MTU exchange callback — discover RX first, then TX
+//  * ------------------------------------------------------------------ */
+// static void exchange_func(struct bt_conn *conn, uint8_t att_err,
+// 			   struct bt_gatt_exchange_params *params)
+// {
+// 	if (att_err) {
+// 		printk("MTU exchange failed (err %d)\n", att_err);
+// 	} else {
+// 		printk("MTU exchanged: %u\n", bt_gatt_get_mtu(conn));
+// 	}
+// 	discover_nus_rx(conn);
+// }
+
+// /* ==========================================================================
+//  * Scan Callback
+//  * ========================================================================== */
+// static void device_found(const bt_addr_le_t *addr, int8_t rssi,
+// 			 uint8_t type, struct net_buf_simple *buf)
+// {
+// 	if (default_conn) {
+// 		return;
+// 	}
+
+// 	/* Name is in ADV_IND — ignore other packet types */
+// 	if (type != BT_GAP_ADV_TYPE_ADV_IND &&
+// 	    type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
+// 		return;
+// 	}
+
+// 	struct net_buf_simple_state state;
+// 	net_buf_simple_save(buf, &state);
+
+// 	while (buf->len > 1) {
+// 		uint8_t len = net_buf_simple_pull_u8(buf);
+// 		if (!len || len > buf->len) break;
+// 		uint8_t ad_type = net_buf_simple_pull_u8(buf);
+// 		if ((ad_type == BT_DATA_NAME_COMPLETE ||
+// 		    ad_type == BT_DATA_NAME_SHORTENED)) {
+// 			int data_len = len - 1;
+// 			if (data_len == strlen(MOBILE_NAME) &&
+// 				memcmp(buf->data, MOBILE_NAME, data_len) == 0) {
+// 				mobile_seen = true;
+//                 printk("Mobile Node detected\n");
+// 			}
+// 		}
+// 		net_buf_simple_pull(buf, len - 1);
+// 	}
+
+// 	net_buf_simple_restore(buf, &state);
+
+// 	if (!mobile_seen) {
+// 		//LOG_INF("In suspicious return block\n");
+// 		return;
+// 	}
+
+// 	char addr_str[BT_ADDR_LE_STR_LEN];
+// 	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+// 	printk("Found Mobile node [%s] RSSI=%d — connecting...\n", addr_str, rssi);
+
+// 	bt_le_scan_stop();
+
+// 	int err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN,
+// 				    BT_LE_CONN_PARAM_DEFAULT, &default_conn);
+// 	if (err) {
+// 		printk("Connect failed (err %d), retrying in 30s...\n", err);
+// 		k_work_schedule(&scan_retry_work, K_MSEC(RETRY_DELAY_MS));
+// 	}
+// }
+
+// /* ==========================================================================
+//  * Start Scan
+//  * ========================================================================== */
+// static void start_scan(void)
+// {
+// 	struct bt_le_scan_param scan_param = {
+// 		.type     = BT_LE_SCAN_TYPE_PASSIVE,
+// 		.options  = BT_LE_SCAN_OPT_NONE,
+// 		.interval = BT_GAP_SCAN_FAST_INTERVAL_MIN,
+// 		.window   = BT_GAP_SCAN_FAST_WINDOW,
+// 	};
+
+// 	int err = bt_le_scan_start(&scan_param, device_found);
+// 	if (err) {
+// 		printk("Scan start failed (err %d)\n", err);
+// 	} else {
+// 		printk("Scanning for SensorNode...\n");
+// 	}
+// }
+
+// /* ==========================================================================
+//  * Connection Callbacks
+//  * ========================================================================== */
+// static void connected(struct bt_conn *conn, uint8_t err)
+// {
+// 	char addr[BT_ADDR_LE_STR_LEN];
+// 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+// 	if (err) {
+// 		printk("Connect failed to %s (err %d), retrying in 30s...\n", addr, err);
+// 		bt_conn_unref(default_conn);
+// 		default_conn = NULL;
+// 		k_work_schedule(&scan_retry_work, K_MSEC(RETRY_DELAY_MS));
+// 		return;
+// 	}
+
+// 	printk("Connected to %s\n", addr);
+
+// 	/* Reset handles from any previous connection */
+// 	nus_tx_handle = 0;
+// 	nus_rx_handle = 0;
+
+// 	/* Negotiate larger ATT MTU first, then discover and subscribe */
+// 	exchange_params.func = exchange_func;
+// 	int mtu_err = bt_gatt_exchange_mtu(conn, &exchange_params);
+// 	if (mtu_err) {
+// 		printk("MTU exchange start failed (err %d), discovering anyway\n", mtu_err);
+// 		discover_nus_tx(conn);
+// 	}
+// }
+
+// static void disconnected(struct bt_conn *conn, uint8_t reason)
+// {
+// 	char addr[BT_ADDR_LE_STR_LEN];
+// 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+// 	printk("Disconnected from %s (reason 0x%02x)\n", addr, reason);
+
+// 	if (default_conn != conn) {
+// 		return;
+// 	}
+
+// 	bt_conn_unref(default_conn);
+// 	default_conn  = NULL;
+// 	nus_tx_handle = 0;
+// 	nus_rx_handle = 0;
+
+// 	printk("Scanning again in 30s...\n");
+// 	k_work_schedule(&scan_retry_work, K_MSEC(RETRY_DELAY_MS));
+// }
+
+// BT_CONN_CB_DEFINE(conn_callbacks) = {
+// 	.connected    = connected,
+// 	.disconnected = disconnected,
+// };
+
+ //////////////////
+
 /* ==========================================================================
  * NUS RX Callback
- *
- * Mobile (data mule) sends all collected sensor readings as plain-text lines,
- * then "END". On receiving "END" the base replies with all stored sensor
- * configs (one line per sensor) then its own "END".
- *
- * Incoming reading line format:
- *   AABBCCDDEEFF,BLE_TIME,TEMP,HUMIDITY,PRESSURE,MOISTURE,MEAS_TIME
- *
- * Outgoing config line format:
- *   NAME,AABBCCDDEEFF,AUTOMATE,PERIOD,TRIGGER
  * ========================================================================== */
 static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 			 void *ctx)
 {
-	/* Print whatever the mobile sends — decoding to be added later */
-	char buf[len + 1];
-	memcpy(buf, data, len);
-	buf[len] = '\0';
-	printk("RX from mobile (%d bytes): %s\n", len, buf);
+	printk("got some shit.\n");
+	//grab the data and put it into a struct
+	struct MobileRx mobile_rx;
+
+	mobile_rx.length = len;
+
+	//copy the data from data to mobile rx buffer
+	memcpy(mobile_rx.encoded, (uint8_t *)data, len);
+
+	//put the struct into the queue
+	int ret = k_msgq_put(&sensors_decomp_msgq, &mobile_rx, K_NO_WAIT);
+		if (ret != 0) {
+			printk("queue failed: %d\n", ret);
+		}
+
 }
 
 static void nus_notif_enabled(bool enabled, void *ctx)
@@ -277,8 +750,48 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 	if (!enabled) {
 		return;
 	}
+    int ret;
 
-	printk("Mobile connected via NUS\n");
+	printk("Mobile subscribed - sending sensor data\n");
+	const char *test = "hello from base!\n";
+
+    //make a fake struct of configs
+    AllConfigs all_configs = AllConfigs_init_zero;
+
+    // add a legitimate config struct to the collection
+    // copy the mac address
+    //make a bullshit struct
+    uint8_t fake_mac[CONFIG_MAC_BYTES] = {120, 230, 32, 110, 56, 98};
+    memcpy(all_configs.configs[all_configs.configs_count].mac_address, fake_mac, CONFIG_MAC_BYTES);
+    all_configs.configs[all_configs.configs_count].automate = false;
+    all_configs.configs[all_configs.configs_count].water_period = 100;
+    all_configs.configs[all_configs.configs_count].water_trigger = 90;
+    all_configs.configs_count++;
+
+    uint8_t fake_mac_1[CONFIG_MAC_BYTES] = {125, 145, 254, 120, 59, 78};
+    memcpy(all_configs.configs[all_configs.configs_count].mac_address, fake_mac_1, CONFIG_MAC_BYTES);
+    all_configs.configs[all_configs.configs_count].automate = false;
+    all_configs.configs[all_configs.configs_count].water_period = 100;
+    all_configs.configs[all_configs.configs_count].water_trigger = 90;
+    all_configs.configs_count++;
+
+    //encode this bitch
+    uint8_t configs_buf[AllConfigs_size];
+    size_t configs_buf_len = 0;
+
+    //encode the AllConfigs
+    ret = base_encode(configs_buf, sizeof(configs_buf), &configs_buf_len, ALL_CONFIGS, &all_configs);
+    if (ret < 0) {
+        printk("Error with nanoPB encoding of sensor config read from file\n");
+    }
+
+    printk("Length of NUS packet: %d\n", (int)configs_buf_len);
+	int err = bt_nus_send(NULL, configs_buf, configs_buf_len);
+	if (err) {
+		printk("Send failed (err %d)\n", err);
+	} else {
+		printk("Sent %d bytes\n", (int)configs_buf_len);
+	}
 }
 
 /* ==========================================================================
@@ -344,23 +857,28 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
  * ========================================================================== */
 int main(void)
 {
-	printk("=== Base Node Starting ===\n");
 
-	sys_slist_init(&sensor_ll);
+	int err;
 
-	printk("Ready — use 'sensor add' to register sensors\n");
-
-	int err = bt_nus_cb_register(&nus_cb, NULL);
+	err = bt_nus_cb_register(&nus_cb, NULL);
 	if (err) {
 		printk("Failed to register NUS callbacks: %d\n", err);
 		return err;
 	}
 
-	err = bt_enable(NULL);
+
+    err = bt_enable(NULL);
 	if (err) {
 		printk("Failed to enable bluetooth: %d\n", err);
 		return err;
 	}
+
+
+	printk("=== Base Node Starting ===\n");
+
+	sys_slist_init(&sensor_ll);
+
+	printk("Ready — use 'sensor add' to register sensors\n");
 
 	k_sleep(K_SECONDS(3));
 
@@ -370,7 +888,11 @@ int main(void)
 		return err;
 	}
 
-	LOG_INF("Base node advertising, waiting for mobile...");
+    // start_scan();
+
+	printk("Base node advertising, waiting for mobile...\n");
+
+    
 
 	while (1) {
 		k_sleep(K_FOREVER);

@@ -3,11 +3,11 @@
 # Copyright (c) 2024 Basalte bv
 # SPDX-License-Identifier: Apache-2.0
 
-mainmenu "Nanopb Configs"
+mainmenu "Sensor Node Configs"
 
 config SENSOR_NUM
 	int "Number of sensors in system"
-	default 4
+	default 2
 	help
 	  Configure the number of sensors stored.
 
@@ -19,8 +19,14 @@ config MAC_BYTES
 
 config NUM_READINGS
     int "Number of data readings taken from sensor before erasure of files"
-        default 2
+        default 12
         help
             Configure the number of readings taken from sensors before erasing data
+
+config APP_WIPE_STORAGE
+	bool "Option to clear the flash area before mounting"
+	help
+	  Use this to force an existing file system to be created.
+
 
 source "Kconfig.zephyr"
