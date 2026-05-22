@@ -4,89 +4,105 @@
 import {Context, Contract, Info, Returns, Transaction} from 'fabric-contract-api';
 import stringify from 'json-stringify-deterministic';
 import sortKeysRecursive from 'sort-keys-recursive';
-import {SensorReading} from './asset';
+import {Visit, Reading} from './asset';
 
-@Info({title: 'IrrigationData', description: 'Smart contract for storing irrigation sensor readings'})
+@Info({title: 'IrrigationData', description: 'Smart contract for storing sensor node visits'})
 export class IrrigationDataContract extends Contract {
 
-    // SubmitReading stores a new sensor reading on the ledger
+    /*
+     * SubmitVisit — store one mobile-node visit on the ledger.
+     *
+     * @param nodeName   Human label for the sensor node (e.g. "garden")
+     * @param timestamp  ISO8601 string for when the visit occurred
+     * @param readings   JSON array of Reading objects (max 12)
+     *                   e.g. '[{"Temp":2310,"Humidity":55,"Moisture":42,"Pressure":101200,"MeasTime":1500}]'
+     */
     @Transaction()
-    public async SubmitReading(
+    public async SubmitVisit(
         ctx: Context,
-        nodeId: string,
+        nodeName: string,
         timestamp: string,
-        moisture: number,
-        humidity: number,
-        temperature: number,
-        pressure: number
+        readings: string,
     ): Promise<void> {
-        const id = `${nodeId}_${timestamp}`;
+        const id = `${nodeName}_${timestamp}`;
 
-        const reading: SensorReading = {
-            docType: 'sensorReading',
-            ID: id,
-            NodeID: nodeId,
+        let parsedReadings: Reading[];
+        try {
+            parsedReadings = JSON.parse(readings) as Reading[];
+        } catch {
+            throw new Error(`Invalid readings JSON: ${readings}`);
+        }
+
+        if (parsedReadings.length === 0 || parsedReadings.length > 12) {
+            throw new Error(`Readings must contain 1–12 entries, got ${parsedReadings.length}`);
+        }
+
+        const visit: Visit = {
+            docType:   'visit',
+            ID:        id,
+            NodeName:  nodeName,
             Timestamp: timestamp,
-            Moisture: moisture,
-            Humidity: humidity,
-            Temperature: temperature,
-            Pressure: pressure,
+            Readings:  parsedReadings,
         };
 
-        await ctx.stub.putState(id, Buffer.from(stringify(sortKeysRecursive(reading))));
-        console.info(`Reading ${id} stored`);
+        await ctx.stub.putState(id, Buffer.from(stringify(sortKeysRecursive(visit))));
+        console.info(`Visit ${id} stored (${parsedReadings.length} readings)`);
     }
 
-    // GetReading returns a single reading by its ID
+    /*
+     * GetVisit — return a single visit by its ID.
+     */
     @Transaction(false)
     @Returns('string')
-    public async GetReading(ctx: Context, id: string): Promise<string> {
+    public async GetVisit(ctx: Context, id: string): Promise<string> {
         const data = await ctx.stub.getState(id);
         if (data.length === 0) {
-            throw new Error(`Reading ${id} does not exist`);
+            throw new Error(`Visit ${id} does not exist`);
         }
         return data.toString();
     }
 
-    // GetAllReadings returns all sensor readings on the ledger
+    /*
+     * GetAllVisits — return every visit on the ledger.
+     */
     @Transaction(false)
     @Returns('string')
-    public async GetAllReadings(ctx: Context): Promise<string> {
-        const allResults = [];
+    public async GetAllVisits(ctx: Context): Promise<string> {
+        const results: Visit[] = [];
         const iterator = await ctx.stub.getStateByRange('', '');
         let result = await iterator.next();
         while (!result.done) {
-            const strValue = Buffer.from(result.value.value.toString()).toString('utf8');
-            let record;
+            const str = Buffer.from(result.value.value).toString('utf8');
             try {
-                record = JSON.parse(strValue) as SensorReading;
-            } catch (err) {
-                record = strValue;
+                results.push(JSON.parse(str) as Visit);
+            } catch {
+                /* skip malformed entries */
             }
-            allResults.push(record);
             result = await iterator.next();
         }
-        return JSON.stringify(allResults);
+        return JSON.stringify(results);
     }
 
-    // GetReadingsByNode returns all readings for a specific sensor node
+    /*
+     * GetVisitsByNode — return all visits for a specific sensor node.
+     * Range query relies on the "<NodeName>_<Timestamp>" key format.
+     */
     @Transaction(false)
     @Returns('string')
-    public async GetReadingsByNode(ctx: Context, nodeId: string): Promise<string> {
-        const allResults = [];
-        const iterator = await ctx.stub.getStateByRange(`${nodeId}_`, `${nodeId}_~`);
+    public async GetVisitsByNode(ctx: Context, nodeName: string): Promise<string> {
+        const results: Visit[] = [];
+        /* '~' sorts after all printable ASCII so this covers the full node range */
+        const iterator = await ctx.stub.getStateByRange(`${nodeName}_`, `${nodeName}_~`);
         let result = await iterator.next();
         while (!result.done) {
-            const strValue = Buffer.from(result.value.value.toString()).toString('utf8');
-            let record;
+            const str = Buffer.from(result.value.value).toString('utf8');
             try {
-                record = JSON.parse(strValue) as SensorReading;
-            } catch (err) {
-                record = strValue;
+                results.push(JSON.parse(str) as Visit);
+            } catch {
+                /* skip malformed entries */
             }
-            allResults.push(record);
             result = await iterator.next();
         }
-        return JSON.stringify(allResults);
+        return JSON.stringify(results);
     }
 }

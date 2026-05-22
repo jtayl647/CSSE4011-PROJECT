@@ -3,9 +3,10 @@
  *
  * HTTP REST server for irrigation system blockchain interface.
  *
- * POST /reading        - submit a sensor reading to the blockchain
- * GET  /readings       - get all readings from the blockchain
- * GET  /readings/:node - get all readings for a specific node
+ * POST /visit          - submit a sensor node visit (node name + timestamp + readings)
+ * GET  /visits         - get all visits from the ledger
+ * GET  /visits/:node   - get all visits for a specific sensor node
+ * GET  /visit/:id      - get a single visit by ID
  */
 
 import * as grpc from '@grpc/grpc-js';
@@ -25,12 +26,12 @@ const chaincodeName = envOrDefault('CHAINCODE_NAME',  'irrigation');
 const mspId         = envOrDefault('MSP_ID',          'Org1MSP');
 const PORT          = parseInt(envOrDefault('PORT',   '3000'));
 
-const cryptoPath       = envOrDefault('CRYPTO_PATH', path.resolve(__dirname, '..', '..', '..', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com'));
-const keyDirectoryPath = envOrDefault('KEY_DIRECTORY_PATH', path.resolve(cryptoPath, 'users', 'User1@org1.example.com', 'msp', 'keystore'));
+const cryptoPath        = envOrDefault('CRYPTO_PATH', path.resolve(__dirname, '..', '..', '..', 'test-network', 'organizations', 'peerOrganizations', 'org1.example.com'));
+const keyDirectoryPath  = envOrDefault('KEY_DIRECTORY_PATH',  path.resolve(cryptoPath, 'users', 'User1@org1.example.com', 'msp', 'keystore'));
 const certDirectoryPath = envOrDefault('CERT_DIRECTORY_PATH', path.resolve(cryptoPath, 'users', 'User1@org1.example.com', 'msp', 'signcerts'));
-const tlsCertPath      = envOrDefault('TLS_CERT_PATH', path.resolve(cryptoPath, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt'));
-const peerEndpoint     = envOrDefault('PEER_ENDPOINT',    'localhost:7051');
-const peerHostAlias    = envOrDefault('PEER_HOST_ALIAS',  'peer0.org1.example.com');
+const tlsCertPath       = envOrDefault('TLS_CERT_PATH',       path.resolve(cryptoPath, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt'));
+const peerEndpoint      = envOrDefault('PEER_ENDPOINT',    'localhost:7051');
+const peerHostAlias     = envOrDefault('PEER_HOST_ALIAS',  'peer0.org1.example.com');
 
 const utf8Decoder = new TextDecoder();
 
@@ -58,76 +59,97 @@ async function main(): Promise<void> {
     app.use(express.json());
 
     // -------------------------------------------------------------------------
-    // POST /reading
-    // Body: { nodeId, timestamp, moisture, humidity, temperature, pressure }
-    // Called by the base node WiFi board when it receives data from the mobile.
+    // POST /visit
+    // Body: {
+    //   nodeName:  string,          // e.g. "garden"
+    //   timestamp: string,          // ISO8601, e.g. "2026-05-21T08:32:00"
+    //   readings:  Reading[]        // 1–12 items
+    // }
+    // Called by the base node WiFi board when it receives a mule delivery.
     // -------------------------------------------------------------------------
-    app.post('/reading', async (req: Request, res: Response) => {
-        const { nodeId, timestamp, moisture, humidity, temperature, pressure } = req.body;
+    app.post('/visit', async (req: Request, res: Response) => {
+        const { nodeName, timestamp, readings } = req.body;
 
-        if (!nodeId || !timestamp || moisture === undefined || humidity === undefined ||
-            temperature === undefined || pressure === undefined) {
-            res.status(400).json({ error: 'Missing required fields: nodeId, timestamp, moisture, humidity, temperature, pressure' });
+        if (!nodeName || !timestamp || !Array.isArray(readings) || readings.length === 0) {
+            res.status(400).json({
+                error: 'Missing required fields: nodeName (string), timestamp (string), readings (array)',
+            });
+            return;
+        }
+
+        if (readings.length > 12) {
+            res.status(400).json({ error: 'A visit may contain at most 12 readings' });
             return;
         }
 
         try {
             await contract.submitTransaction(
-                'SubmitReading',
-                nodeId,
+                'SubmitVisit',
+                nodeName,
                 timestamp,
-                moisture.toString(),
-                humidity.toString(),
-                temperature.toString(),
-                pressure.toString()
+                JSON.stringify(readings),
             );
-            console.log(`Reading stored: ${nodeId} @ ${timestamp}`);
-            res.status(201).json({ success: true, id: `${nodeId}_${timestamp}` });
+            const id = `${nodeName}_${timestamp}`;
+            console.log(`Visit stored: ${id} (${readings.length} readings)`);
+            res.status(201).json({ success: true, id });
         } catch (err) {
-            console.error('SubmitReading failed:', err);
+            console.error('SubmitVisit failed:', err);
             res.status(500).json({ error: String(err) });
         }
     });
 
     // -------------------------------------------------------------------------
-    // GET /readings
-    // Returns all sensor readings — used by the web dashboard.
+    // GET /visits
+    // Returns all visits — used by the web dashboard.
     // -------------------------------------------------------------------------
-    app.get('/readings', async (_req: Request, res: Response) => {
+    app.get('/visits', async (_req: Request, res: Response) => {
         try {
-            const resultBytes = await contract.evaluateTransaction('GetAllReadings');
-            const result = JSON.parse(utf8Decoder.decode(resultBytes));
-            res.json(result);
+            const resultBytes = await contract.evaluateTransaction('GetAllVisits');
+            res.json(JSON.parse(utf8Decoder.decode(resultBytes)));
         } catch (err) {
-            console.error('GetAllReadings failed:', err);
+            console.error('GetAllVisits failed:', err);
             res.status(500).json({ error: String(err) });
         }
     });
 
     // -------------------------------------------------------------------------
-    // GET /readings/:nodeId
-    // Returns readings for a specific node — used by the web dashboard.
+    // GET /visits/:nodeName
+    // Returns all visits for a specific sensor node.
     // -------------------------------------------------------------------------
-    app.get('/readings/:nodeId', async (req: Request, res: Response) => {
-        const { nodeId } = req.params;
+    app.get('/visits/:nodeName', async (req: Request, res: Response) => {
+        const { nodeName } = req.params;
         try {
-            const resultBytes = await contract.evaluateTransaction('GetReadingsByNode', String(nodeId));
-            const result = JSON.parse(utf8Decoder.decode(resultBytes));
-            res.json(result);
+            const resultBytes = await contract.evaluateTransaction('GetVisitsByNode', nodeName);
+            res.json(JSON.parse(utf8Decoder.decode(resultBytes)));
         } catch (err) {
-            console.error('GetReadingsByNode failed:', err);
+            console.error('GetVisitsByNode failed:', err);
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // -------------------------------------------------------------------------
+    // GET /visit/:id
+    // Returns a single visit by its full ID ("<nodeName>_<timestamp>").
+    // -------------------------------------------------------------------------
+    app.get('/visit/:id', async (req: Request, res: Response) => {
+        const { id } = req.params;
+        try {
+            const resultBytes = await contract.evaluateTransaction('GetVisit', id);
+            res.json(JSON.parse(utf8Decoder.decode(resultBytes)));
+        } catch (err) {
+            console.error('GetVisit failed:', err);
             res.status(500).json({ error: String(err) });
         }
     });
 
     app.listen(PORT, () => {
         console.log(`Irrigation API server running on http://localhost:${PORT}`);
-        console.log(`  POST /reading          - submit sensor reading`);
-        console.log(`  GET  /readings         - get all readings`);
-        console.log(`  GET  /readings/:nodeId - get readings for a node`);
+        console.log(`  POST /visit            - submit a sensor node visit`);
+        console.log(`  GET  /visits           - get all visits`);
+        console.log(`  GET  /visits/:nodeName - get visits for a node`);
+        console.log(`  GET  /visit/:id        - get a single visit by ID`);
     });
 
-    // Keep the gateway open for the lifetime of the server
     process.on('SIGINT', () => {
         gateway.close();
         client.close();

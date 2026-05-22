@@ -13,34 +13,64 @@ NOTE: Server runs on http://localhost:3000
 
 HOW TO USE:
 
-POST /reading
-  Submit a sensor reading to the blockchain.
+POST /visit
+  Submit a sensor node visit to the blockchain.
+  A visit is one mobile-node collection event: a node name, a timestamp,
+  and up to 12 sensor readings taken during that visit.
+
   Body (JSON):
     {
-      "nodeId":      "node1",
-      "timestamp":   "2026-05-11T08:32:00",
-      "moisture":    45,
-      "humidity":    62,
-      "temperature": 24,
-      "pressure":    1013
+      "nodeName":  "garden",
+      "timestamp": "2026-05-21T08:32:00",
+      "readings": [
+        { "Temp": 2310, "Humidity": 55, "Moisture": 42, "Pressure": 101200, "MeasTime": 1500 },
+        { "Temp": 2295, "Humidity": 56, "Moisture": 41, "Pressure": 101198, "MeasTime": 3000 }
+      ]
     }
 
+  Note: Temp and Pressure are scaled integers (divide by 100 for real values).
+        e.g. Temp 2310 = 23.10 °C,  Pressure 101200 = 1012.00 hPa
+
   Example:
-    curl -X POST http://localhost:3000/reading \
+    curl -X POST http://localhost:3000/visit \
       -H "Content-Type: application/json" \
-      -d '{"nodeId":"node1","timestamp":"2026-05-11T08:32:00","moisture":45,"humidity":62,"temperature":24,"pressure":1013}'
+      -d '{
+        "nodeName":  "garden",
+        "timestamp": "2026-05-21T08:32:00",
+        "readings": [
+          { "Temp": 2310, "Humidity": 55, "Moisture": 42, "Pressure": 101200, "MeasTime": 1500 },
+          { "Temp": 2295, "Humidity": 56, "Moisture": 41, "Pressure": 101198, "MeasTime": 3000 }
+        ]
+      }'
 
-GET /readings
-  Returns all sensor readings from the blockchain.
+  Response:
+    { "success": true, "id": "garden_2026-05-21T08:32:00" }
+
+________________________________________________________________________________________________________
+
+GET /visits
+  Returns all visits from the blockchain.
 
   Example:
-    curl http://localhost:3000/readings
+    curl http://localhost:3000/visits
 
-GET /readings/:nodeId
-  Returns all readings for a specific node.
+________________________________________________________________________________________________________
+
+GET /visits/:nodeName
+  Returns all visits for a specific sensor node.
 
   Example:
-    curl http://localhost:3000/readings/node1
+    curl http://localhost:3000/visits/garden
+
+________________________________________________________________________________________________________
+
+GET /visit/:id
+  Returns a single visit by its full ID ("<nodeName>_<timestamp>").
+
+  Example:
+    curl http://localhost:3000/visit/garden_2026-05-21T08:32:00
+
+________________________________________________________________________________________________________
 
 HOW TO STOP:
 ________________________________________________________________________________________________________
