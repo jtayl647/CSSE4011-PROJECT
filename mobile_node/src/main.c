@@ -78,22 +78,22 @@ K_MUTEX_DEFINE(shared_sensor_mutex);
 K_SEM_DEFINE(config_read_sem, 0, 1);
 
 struct SensorRx {
-	uint8_t encoded[255];
+	uint8_t encoded[SensorNode_size];
 	uint16_t length;
 };
 
 struct SensorTx {
-	uint8_t encoded[255];
+	uint8_t encoded[SensorConfig_size];
 	uint16_t length;
 };
 
 struct BaseRx {
-	uint8_t encoded[255];
+	uint8_t encoded[AllConfigs_size];
 	uint16_t length;
 };
 
 struct BaseTx {
-	uint8_t encoded[255];
+	uint8_t encoded[Nodes_size];
 	uint16_t length;
 };
 
@@ -420,6 +420,8 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
 		//initialise a Nodes struct to read into
 		Nodes nodes = Nodes_init_zero;
+		//set the time that the mobile interracted with the base
+		nodes.base_transaction_time = (int32_t)k_uptime_get_32();
 		//now read from the file into nodes
 		printk("Before reading file\n");
 		ret = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &nodes);

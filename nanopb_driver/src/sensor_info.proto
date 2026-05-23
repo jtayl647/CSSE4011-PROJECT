@@ -18,4 +18,5 @@ message SensorNode {
 
 message Nodes {
     repeated SensorNode nodes = 1;
+    int32 base_transaction_time = 2;
 }
