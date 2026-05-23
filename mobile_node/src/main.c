@@ -462,6 +462,14 @@ static uint8_t notify_func(struct bt_conn *conn,
 	}
 
 	if (base_seen) {
+		/* Check for empty sentinel — base has no sensors configured */
+		if (length == 1 && ((uint8_t *)data)[0] == 0x00) {
+			printk("Base has no sensors configured\n");
+			base_seen = false;
+			k_work_submit(&disconnect_work);
+			return BT_GATT_ITER_STOP;
+		}
+
 		/* Store incoming AllConfigs */
 		struct BaseRx base_rx;
 		base_rx.length = length;

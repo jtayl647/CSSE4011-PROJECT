@@ -376,6 +376,14 @@ static void nus_notif_enabled(bool enabled, void *ctx)
     }
 	printk("after encoding");
     printk("Length of NUS packet: %d\n", (int)configs_buf_len);
+
+	if (configs_buf_len == 0) {
+		printk("No sensors configured — sending empty sentinel\n");
+		uint8_t sentinel = 0x00;
+		bt_nus_send(NULL, &sentinel, 1);
+		return;
+	}
+
 	int err = bt_nus_send(NULL, configs_buf, configs_buf_len);
 	if (err) {
 		printk("Send failed (err %d)\n", err);
@@ -492,12 +500,14 @@ int main(void)
 }
 
 // Example:
-// Using first
-// sensor add sensor_one 1 C8 8C C0 D2 0A E4
-// sensor add sensor_two 1 B9 F3 1A 0D 82 F4
 
-// sensor config sensor_one automate 1
+// Sensor:
+// sensor add one 1 41 10 64 B4 EE E4
+// sensor config one automate 1
 
+// Randoms:
+// sensor add two 1 C8 8C C0 D2 0A E4
+// sensor add three 1 B9 F3 1A 0D 82 F4
 
 // 1. add two lots of configurations to linked list
 // 2. unplug all sensors
