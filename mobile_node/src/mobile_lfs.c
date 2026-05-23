@@ -231,6 +231,8 @@ int mobile_lfs_config_write(void* cf, char* path, void* all_cnfgs) {
             LOG_ERR("Error when writing data to config file\n");
             return -1;
         }
+
+        printk("Successfully wrote: {%s} to %s", config_buffer, path);
     
     }
 
@@ -272,6 +274,7 @@ int mobile_lfs_config_read(void* cf, char* path, void* mac_buf, void* dest_confi
     rc = fs_open(config_file, path, FS_O_READ);
     if (rc < 0) {
         LOG_ERR("Failed to open %s for reading\n", path);
+        LOG_ERR("rc error no: %d\n", rc);
     }
 
     //buffer to read into each time a read is called
@@ -348,6 +351,7 @@ int mobile_lfs_config_read(void* cf, char* path, void* mac_buf, void* dest_confi
         return rc;
     }
     //The function returns by default if it does not find a config for the node
+    printk("At the [no config] -ve return\n");
     return -1;
 }
 
@@ -553,6 +557,13 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
             line = strtok(NULL, "\n");
         }
     }
+
+    //having read the file, now truncate it back to zero
+    rc = fs_truncate(readings_file, 0);
+	if (rc < 0) {
+		LOG_ERR("failed to truncate %s while reading\n", path);
+		return -1;
+	}
 
     rc = fs_close(readings_file);
     if (rc < 0) {
