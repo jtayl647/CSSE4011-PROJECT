@@ -542,6 +542,18 @@ int main(void)
 	bt_id_get(&addr, &count);
 	memcpy(g_node.mac_address, addr.a.val, sizeof(g_node.mac_address));
 
+	//transfer anything that was on the file onto g_node
+	k_mutex_lock(&file_mutex, K_FOREVER);
+	k_mutex_lock(&g_node_mutex, K_FOREVER);
+
+	int ret = sensor_lfs_read_from_file(&readings_file, readings_path, &g_node);
+	if (ret < 0) {
+		printk("Error when reading readings file to g_node from boot\n");
+	}
+
+	k_mutex_unlock(&g_node_mutex);
+	k_mutex_unlock(&file_mutex);
+
 	k_sleep(K_SECONDS(3));
 
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
