@@ -85,6 +85,7 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 		printk("AllNodes struct buffer received!\n");
 		//we now have information passed to us, we need to decode the Nodes struct
 		Nodes nodes = Nodes_init_zero;
+		nodes.base_time = (int32_t)k_uptime_get_32();
 
 		ret = base_decode(mobile_rx.encoded, mobile_rx.length, NODES, &nodes);
 		if (ret < 0) {

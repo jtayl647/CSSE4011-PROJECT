@@ -421,7 +421,7 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 		//initialise a Nodes struct to read into
 		Nodes nodes = Nodes_init_zero;
 		//set the time that the mobile interracted with the base
-		nodes.base_transaction_time = (int32_t)k_uptime_get_32();
+		nodes.mobile_time = (int32_t)k_uptime_get_32();		
 		//now read from the file into nodes
 		printk("Before reading file\n");
 		ret = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &nodes);
