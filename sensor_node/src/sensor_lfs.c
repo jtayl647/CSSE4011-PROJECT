@@ -55,7 +55,7 @@ int sensor_lfs_init(void* mp, void* file, char* file_name, char *full_path) {
 	//Creat the full filepath to the file containing past readings
 	snprintf(path, sizeof(path), "%s/readings.txt", mountpoint->mnt_point);
 	
-	// LOG_PRINTK("mountpoint path: %s\n", path);
+	LOG_PRINTK("mountpoint path: %s\n", path);
 
 	//Construct the file which will hold all past sensor readings
 	make_file(mountpoint, readings, file_name, full_path);
@@ -129,9 +129,9 @@ static int littlefs_flash_erase(unsigned int id)
 		return rc;
 	}
 
-	// LOG_PRINTK("Area %u at 0x%x on %s for %u bytes\n",
-	// 	   id, (unsigned int)pfa->fa_off, pfa->fa_dev->name,
-	// 	   (unsigned int)pfa->fa_size);
+	LOG_PRINTK("Area %u at 0x%x on %s for %u bytes\n",
+		   id, (unsigned int)pfa->fa_off, pfa->fa_dev->name,
+		   (unsigned int)pfa->fa_size);
 
 	/* Optional wipe flash contents */
 	if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE)) {
@@ -162,11 +162,11 @@ static int littlefs_mount(struct fs_mount_t *mp)
     
 	rc = fs_mount(mp);
 	if (rc < 0) {
-		// LOG_PRINTK("FAIL: mount id %" PRIuPTR " at %s: %d\n",
-		//        (uintptr_t)mp->storage_dev, mp->mnt_point, rc);
+		LOG_PRINTK("FAIL: mount id %" PRIuPTR " at %s: %d\n",
+		       (uintptr_t)mp->storage_dev, mp->mnt_point, rc);
 		return rc;
 	}
-	// LOG_PRINTK("%s mount: %d\n", mp->mnt_point, rc);
+	LOG_PRINTK("%s mount: %d\n", mp->mnt_point, rc);
 
 	return 0;
 }
@@ -203,7 +203,7 @@ int sensor_lfs_write_to_file(void* file, char* filename, void* sensor_readings) 
          INT32_MAX_WIDTH, data->moisture,
          INT32_MAX_WIDTH, data->meas_time);
 	
-	// LOG_INF("Written to file: %s\n", measurements);
+	LOG_INF("Written to file: %s\n", measurements);
 
 	//write the new entry to the file
     if (fs_write(readings, (void *)measurements, strlen(measurements)) < 0) {
@@ -263,15 +263,15 @@ int sensor_lfs_read_from_file(void* file, char* filename, void* sensor_node) {
 		char *line = strtok(buf, "\n");
 
 		while (line != NULL) {
-			// LOG_INF("Line seen in file: %s\n", line);
+			LOG_INF("Line seen in file: %s\n", line);
 			//scan the preformatted line into the buffer
 			int scanned = sscanf(line, "%d,%d,%d,%d,%d", &temp, &humidity, &pressure, &moisture, &meas_time);
 			//check to see that we scanned the right amount of things in
-			// if (scanned == 5) {
-			// 	printk("Successful DataReadings line read\n");
-			// } else {
-			// 	printk("Unsuccessful DataReadings line read\n");
-			// }
+			if (scanned == 5) {
+				printk("Successful DataReadings line read\n");
+			} else {
+				printk("Unsuccessful DataReadings line read\n");
+			}
 			//populate the sensorNodes struct
 			add_reading(sensor, temp, humidity, pressure, moisture, meas_time);
 			line = strtok(NULL, "\n");
@@ -349,5 +349,5 @@ static void add_reading(SensorNode *sensor, int32_t temp, int32_t humidity,
 	sensor->readings[i].meas_time = meas_time;
 	sensor->readings_count++;
 
-	// printk("Reading added (%d/%d)\n", sensor->readings_count, max);
+	printk("Reading added (%d/%d)\n", sensor->readings_count, max);
 }
