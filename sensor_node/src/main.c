@@ -551,6 +551,13 @@ int main(void)
 		printk("Error when reading readings file to g_node from boot\n");
 	}
 
+	//truncate after reading from the stored stuff
+	int cerr = sensor_lfs_file_truncate((void*)(&readings_file), readings_path);
+	if (cerr < 0) {
+		LOG_ERR("Failed to truncate readings file after boot\n");
+	}
+
+
 	k_mutex_unlock(&g_node_mutex);
 	k_mutex_unlock(&file_mutex);
 
