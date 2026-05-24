@@ -21,7 +21,8 @@
 
 #define DEVICE_NAME     CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
-#define FILE_WRITE_THREAD_STACK 4096 * 4
+#define FILE_WRITE_THREAD_STACK 4096
+#define FILE_READ_THREAD_STACK 32768
 #define FILE_WRITE_THREAD_PRIO 6
 
 
@@ -214,6 +215,9 @@ static void readings_file_write_thread_fn(void *a, void *b, void *c) {
 		SensorNode node = SensorNode_init_zero;
 		ret = mobile_decode(sensor_rx.encoded, sensor_rx.length, SENSOR_NODE, &node);
 
+		//now put in the mobile node's clock as the time the mobile seens the sensor
+		node.mobile_sees_sensor = (int32_t)k_uptime_get_32();
+		
 		//Try writing the SensorNode to a file
 		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
 		ret = mobile_lfs_write_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &node);
@@ -417,13 +421,14 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 		k_sem_take(&readings_file_read_sem, K_FOREVER);
 		printk("Received green light to start reading from sensor file\n");
 		//we have received the semaphore, lock up the readings file with mutexes
-		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
 		//initialise a Nodes struct to read into
 		Nodes nodes = Nodes_init_zero;
 		//set the time that the mobile interracted with the base
-		nodes.mobile_time = (int32_t)k_uptime_get_32();		
+		nodes.mobile_sees_base = (int32_t)k_uptime_get_32();		
 		//now read from the file into nodes
 		printk("Before reading file\n");
+		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
+		printk("After the file mutex lock\n");
 		ret = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &nodes);
 		if (ret < 0) {
 			printk("Failed to read properly from the sensor file\n");
@@ -459,7 +464,7 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 	}
 }
 
-K_THREAD_DEFINE(readings_file_read_thread, FILE_WRITE_THREAD_STACK,
+K_THREAD_DEFINE(readings_file_read_thread, FILE_READ_THREAD_STACK,
 		readings_file_read_thread_fn, NULL, NULL, NULL,
 		FILE_WRITE_THREAD_PRIO, 0, 0);
 

@@ -14,8 +14,11 @@
 #include <sensor_info.pb.h>
 #include "nanopb_types.h"
 #include "base_pb.h"
+#include "base_json.h"
 
 LOG_MODULE_REGISTER(base_node, LOG_LEVEL_INF);
+
+static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes, char* name);
 
 /* ==========================================================================
  * Sensor Registry — Zephyr singly-linked list
@@ -69,6 +72,10 @@ K_MSGQ_DEFINE(sensors_decomp_msgq,
               4,
               4);
 
+K_MSGQ_DEFINE(nodes_json_msgq,
+              Nodes_size,
+              4,
+              4);
 
 
 static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
@@ -85,9 +92,6 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 		printk("AllNodes struct buffer received!\n");
 		//we now have information passed to us, we need to decode the Nodes struct
 		Nodes nodes = Nodes_init_zero;
-		//This is how long the base has been running for when it receives a packet from mobile.
-		nodes.base_time = (int32_t)k_uptime_get_32();
-
 		ret = base_decode(mobile_rx.encoded, mobile_rx.length, NODES, &nodes);
 		if (ret < 0) {
 			printk("Error, issue with decoding Nodes struct coming from mobile node\n");
@@ -101,7 +105,7 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 				current_node.mac_address[0], current_node.mac_address[1],
 				current_node.mac_address[2], current_node.mac_address[3],
 				current_node.mac_address[4], current_node.mac_address[5],
-				current_node.ble_time);
+				current_node.sensor_sees_mobile);
 			for (int j = 0; j < current_node.readings_count; j++) {
 				//retrieve the readings 
 				DataReadings reading = current_node.readings[j];
@@ -111,6 +115,12 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 			}
 		}
 
+		//put the Nodes struct into a queue that leads to the json thread
+		ret = k_msgq_put(&nodes_json_msgq, &nodes, K_NO_WAIT);
+		if (ret < 0) {
+			printk("Error putting Nodes into json queue: %d\n", ret);
+		}
+
 		k_sleep(K_MSEC(1));
 	}
 }
@@ -118,6 +128,82 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 K_THREAD_DEFINE(sensors_decomp_thread, SENSOR_DECOMP_STACK,
 		sensors_decomp_thread_fn, NULL, NULL, NULL,
 		SENSOR_DECOMP_PRIO, 0, 0);
+
+static void json_nodes_thread_fn(void *a, void *b, void *c) {
+
+	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+
+	int ret;
+	Nodes nodes = Nodes_init_zero;
+
+	while(1) {
+		printk("Waiting to receive Nodes struct to json struct\n");
+		//wait on a queue on received data from the mobile node
+		k_msgq_get(&nodes_json_msgq, &nodes, K_FOREVER);
+
+		//now we need to loop through the number of SensorNodes received
+		for (int i = 0; i < nodes.nodes_count; i++) {
+			//set up a buffer to read name into
+			char matched_name[32];
+
+			char json_buffer[512];
+
+			//lock up the linked list
+			k_mutex_lock(&sensor_ll_mutex, K_FOREVER);
+			ret = match_name_to_mac(&nodes.nodes[i], &sensor_ll, matched_name);
+			k_mutex_unlock(&sensor_ll_mutex);
+
+			if (ret < 0) {
+				printk("Error matching name to mac when making json\n");
+			}
+
+			//now we have a name, pass the name and the sensor node to json function
+			ret = create_sensor_json(&nodes.nodes[i], matched_name, json_buffer, nodes.mobile_sees_base);
+			if (ret < 0) {
+				printk("Error in thread creating json: %d\n", ret);
+			}
+
+			//we have a functioning json buffer, print it
+			printk("%s\n", json_buffer);
+
+		}
+
+		k_sleep(K_MSEC(1));
+	}
+}
+
+K_THREAD_DEFINE(json_nodes_thread, SENSOR_DECOMP_STACK,
+		json_nodes_thread_fn, NULL, NULL, NULL,
+		SENSOR_DECOMP_PRIO, 0, 0);
+
+static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes, char* name) {
+	//iterate through the linked list
+	struct sensor_container *c;
+	SYS_SLIST_FOR_EACH_CONTAINER(base_nodes, c, node) {
+
+		bool match = true;
+		//compare each value in the ll address and the decoded sensor addresss
+		for (int i = 0; i < CONFIG_MAC_BYTES; i++) {
+			uint8_t list_addr_piece = c->sensor->addr.a.val[i];
+			//account for potential endianness switch up
+			uint8_t decoded_addr_piece = decoded_sensor->mac_address[CONFIG_MAC_BYTES - 1 - i];
+			if (list_addr_piece != decoded_addr_piece) {
+				match = false;
+				break;
+			}
+		}
+		if (match) {
+			memcpy(name, c->sensor->name, 32);
+			return 0;
+		} else {
+			match = true;
+		}
+	}
+
+	//no match was ever found
+	return -1;
+	
+}
 
 /* ==========================================================================
  * Internal helpers

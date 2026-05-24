@@ -426,7 +426,7 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 
 	/* Stamp the time this connection happened so the mobile node knows
 	 * the uptime reference point for all the meas_time values */
-	g_node.ble_time = (int32_t)k_uptime_get();
+	g_node.sensor_sees_mobile = (int32_t)k_uptime_get();
 
 	/* static so it lives in BSS not on the BLE callback stack (1387 bytes) */
 	static uint8_t buf[SensorNode_size];

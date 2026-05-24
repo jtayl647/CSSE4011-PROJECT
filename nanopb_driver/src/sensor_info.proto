@@ -12,12 +12,12 @@ message DataReadings {
 
 message SensorNode {
     bytes mac_address = 1;
-    int32 ble_time = 2;
-    repeated DataReadings readings = 3;
+    int32 sensor_sees_mobile = 2;
+    int32 mobile_sees_sensor = 3;
+    repeated DataReadings readings = 4;
 }
 
 message Nodes {
     repeated SensorNode nodes = 1;
-    int32 base_time = 2;
-    int32 mobile_time = 3;
+    int32 mobile_sees_base = 2;
 }

@@ -17,7 +17,7 @@ static int littlefs_mount(struct fs_mount_t *mp);
 static void copy_mac(unsigned char *block_mac, unsigned char *new_mac);
 static uint8_t mac_compare(unsigned char *block_mac, unsigned char *line_mac);
 static void add_to_sensor_node(SensorNode* sensor, unsigned char *line_mac,
-     int32_t ble_time, int32_t temp,
+     int32_t ble_time, int32_t mobile_sees_sensor, int32_t temp,
       int32_t humidity, int32_t pressure,
        int32_t moisture, int32_t meas_time);
 
@@ -396,14 +396,15 @@ int mobile_lfs_write_sensor_readings(void* rf, char* path, void* sensor_node) {
 
         //write to the buffer all info relevant to this node
         snprintf(readings_buffer, sizeof(readings_buffer),
-            "%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX,%0*d,%0*d,%0*d,%0*d,%0*d,%0*d\n",
+            "%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX,%0*d,%0*d,%0*d,%0*d,%0*d,%0*d,%0*d\n",
             (uint8_t)sensor->mac_address[0],
             (uint8_t)sensor->mac_address[1],
             (uint8_t)sensor->mac_address[2],
             (uint8_t)sensor->mac_address[3],
             (uint8_t)sensor->mac_address[4],
             (uint8_t)sensor->mac_address[5],
-            INT_32_MAX_WIDTH, sensor->ble_time,
+            INT_32_MAX_WIDTH, sensor->sensor_sees_mobile,
+            INT_32_MAX_WIDTH, sensor->mobile_sees_sensor,
             INT_32_MAX_WIDTH, data.temp,
             INT_32_MAX_WIDTH, data.humidity,
             INT_32_MAX_WIDTH, data.pressure,
@@ -437,40 +438,56 @@ int mobile_lfs_write_sensor_readings(void* rf, char* path, void* sensor_node) {
 int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
     
     int rc;
-    
+    printk("After rc\n");
     //case the readings file back to a file type
     struct fs_file_t *readings_file = rf;
+    printk("After reading file cast\n");
     //cast the Nodes struct to type
     Nodes *nodes_collection = all_nodes;
+    printk("After Nodes cast\n");
 
     //open the file for reading
     rc = fs_open(readings_file, path, FS_O_READ);
-    if (rc < 0) {
-        LOG_ERR("Failed to open %s for reading\n", path);
+    printk("After reading file open\n");
+    if (rc < 0) {   
+        LOG_ERR("Failed to open %s for reading: %d\n", path, rc);
         return rc;
     }
 
     
     //Flag for first read
     uint8_t first_read = 1;
+    printk("After first read declaration\n");
 
     //Buffer to read into
     char readings_buffer[READINGS_CSV_LINE_LENGTH];
+    printk("After readings_buffer declaration\n");
 
     //struct to put sensor node data into
     SensorNode sensor = SensorNode_init_zero;
+    printk("After sensorNode initialisation\n");
 
     //MAC address of current block of readings
     unsigned char block_mac[CONFIG_MAC_BYTES];
+    printk("After block_mac initiation\n");
 
     //fields to read data from file to
 	unsigned char line_mac[CONFIG_MAC_BYTES];
-    int32_t ble_time = 0;
+    printk("After line_mac init\n");
+    int32_t sensor_sees_mobile = 0;
+    printk("After sensor sees mobile init\n");
+    int32_t mobile_sees_sensor = 0;
+    printk("After mobile sees sensor init\n");
     int32_t temp = 0;
+    printk("After temp init\n");
 	int32_t humidity = 0;
+    printk("After humidity init\n");
 	int32_t pressure = 0;
+    printk("After pressure init\n");
 	int32_t moisture = 0;
+    printk("After moisture init\n");
 	int32_t meas_time = 0;
+    printk("After meas_time init\n");
 
     //now we need to start reading from the file
     while (1) {
@@ -505,15 +522,15 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
         while (line != NULL) {
 
             //scan the info from the buffer into elements
-            int scanned = sscanf(line, "%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX,%d,%d,%d,%d,%d,%d",
+            int scanned = sscanf(line, "%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX,%d,%d,%d,%d,%d,%d,%d",
                 &line_mac[0], &line_mac[1], &line_mac[2], &line_mac[3], &line_mac[4], &line_mac[5],
-                &ble_time, &temp, &humidity, &pressure, &moisture, &meas_time
+                &sensor_sees_mobile, &mobile_sees_sensor, &temp, &humidity, &pressure, &moisture, &meas_time
                 );
             //check to see if we scanned the right number of things
-            if (scanned == 12) {
+            if (scanned == 13) {
                 LOG_INF("Successfully scanned 12 elements to %s\n", path);
-                printk("MAC: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX, ble_time: %d, temp: %d, humidity: %d, pressure: %d, moisture: %d, meas_time: %d\n",
-                line_mac[0], line_mac[1], line_mac[2], line_mac[3], line_mac[4], line_mac[5], ble_time,
+                printk("MAC: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX, ble_time: %d, mobile_sees_sensor: %d, temp: %d, humidity: %d, pressure: %d, moisture: %d, meas_time: %d\n",
+                line_mac[0], line_mac[1], line_mac[2], line_mac[3], line_mac[4], line_mac[5], sensor_sees_mobile, mobile_sees_sensor,
                 temp, humidity, pressure, moisture, meas_time);
                 //check to see if it's the first time reading
                 if (first_read) {
@@ -530,7 +547,9 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                 //check to see if the line mac and the block mac are the same
                 if (mac_compare(block_mac, line_mac)) {
                     printk("Inside of the mac_compare return check\n");
-                    add_to_sensor_node(&sensor, line_mac, ble_time,
+
+                    //change to include the mobile_sees_sensor
+                    add_to_sensor_node(&sensor, line_mac, sensor_sees_mobile, mobile_sees_sensor,
                          temp, humidity, pressure, moisture, meas_time);
                     printk("After the first add to sensor node call\n");
                 } else {
@@ -545,12 +564,13 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                     //memcpy(block_mac, line_mac, CONFIG_MAC_BYTES);
                     copy_mac(block_mac, line_mac);
                     //copy across data
-                    add_to_sensor_node(&sensor, line_mac, ble_time,
+                    add_to_sensor_node(&sensor, line_mac, sensor_sees_mobile, mobile_sees_sensor,
                          temp, humidity, pressure, moisture, meas_time);
                 }
                 
             } else {
                 LOG_ERR("Failed, scanned %d elements to %s\n", scanned, path);
+                fs_close(readings_file);
                 return -1;
             }
             printk("Before the NULL strtok call\n");
@@ -579,7 +599,7 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
  =====================================*/
 
 static void add_to_sensor_node(SensorNode* sensor, unsigned char *line_mac,
-     int32_t ble_time, int32_t temp,
+     int32_t ble_time, int32_t mobile_sees_sensor, int32_t temp,
       int32_t humidity, int32_t pressure,
        int32_t moisture, int32_t meas_time) {
 
@@ -594,7 +614,9 @@ static void add_to_sensor_node(SensorNode* sensor, unsigned char *line_mac,
     sensor->mac_address[2], sensor->mac_address[3],
     sensor->mac_address[4], sensor->mac_address[5]);
     //put the ble time into the SensorNode
-    sensor->ble_time = ble_time;
+    sensor->sensor_sees_mobile = ble_time;
+    //put the mobile sees sensor time into the SensorNode
+    sensor->mobile_sees_sensor = mobile_sees_sensor;
     //put the information from this line into the SensorNode struct
     //make a DataReadings struct
     DataReadings line_data = DataReadings_init_zero;
