@@ -438,17 +438,13 @@ int mobile_lfs_write_sensor_readings(void* rf, char* path, void* sensor_node) {
 int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
     
     int rc;
-    printk("After rc\n");
     //case the readings file back to a file type
     struct fs_file_t *readings_file = rf;
-    printk("After reading file cast\n");
     //cast the Nodes struct to type
     Nodes *nodes_collection = all_nodes;
-    printk("After Nodes cast\n");
 
     //open the file for reading
     rc = fs_open(readings_file, path, FS_O_READ);
-    printk("After reading file open\n");
     if (rc < 0) {   
         LOG_ERR("Failed to open %s for reading: %d\n", path, rc);
         return rc;
@@ -457,44 +453,31 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
     
     //Flag for first read
     uint8_t first_read = 1;
-    printk("After first read declaration\n");
 
     //Buffer to read into
     char readings_buffer[READINGS_CSV_LINE_LENGTH];
-    printk("After readings_buffer declaration\n");
 
     //struct to put sensor node data into
     SensorNode sensor = SensorNode_init_zero;
-    printk("After sensorNode initialisation\n");
 
     //MAC address of current block of readings
     unsigned char block_mac[CONFIG_MAC_BYTES];
-    printk("After block_mac initiation\n");
 
     //fields to read data from file to
 	unsigned char line_mac[CONFIG_MAC_BYTES];
-    printk("After line_mac init\n");
     int32_t sensor_sees_mobile = 0;
-    printk("After sensor sees mobile init\n");
     int32_t mobile_sees_sensor = 0;
-    printk("After mobile sees sensor init\n");
     int32_t temp = 0;
-    printk("After temp init\n");
 	int32_t humidity = 0;
-    printk("After humidity init\n");
 	int32_t pressure = 0;
-    printk("After pressure init\n");
 	int32_t moisture = 0;
-    printk("After moisture init\n");
 	int32_t meas_time = 0;
-    printk("After meas_time init\n");
 
     //now we need to start reading from the file
     while (1) {
 
         //get a reading from the file
 		ssize_t len = fs_read(readings_file, readings_buffer, sizeof(readings_buffer) - 1);
-        printk("After the read call\n");
         //check to see if we have reached the end of the file
         if (len <= 0) {
 
@@ -502,14 +485,11 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                 printk("Reading error\n");
                 return -1;
             }
-            printk("In EOF condition\n");
             //add the last sensor node to the Nodes struct
             //put the last version of the SensorNode into the Nodes struct
             nodes_collection->nodes[nodes_collection->nodes_count] = sensor;
-            printk("After the final nodes assignation\n");
             //Increase the number of nodes added to the overall Nodes struct
             nodes_collection->nodes_count++;
-            printk("After the increment of number of nodes in the Nodes struct\n");
             break;
         }
 
@@ -542,18 +522,12 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                     //memcpy(block_mac, line_mac, CONFIG_MAC_BYTES);
                     copy_mac(block_mac, line_mac);
                 }
-                printk("After first_read block\n");
-
                 //check to see if the line mac and the block mac are the same
                 if (mac_compare(block_mac, line_mac)) {
-                    printk("Inside of the mac_compare return check\n");
-
                     //change to include the mobile_sees_sensor
                     add_to_sensor_node(&sensor, line_mac, sensor_sees_mobile, mobile_sees_sensor,
                          temp, humidity, pressure, moisture, meas_time);
-                    printk("After the first add to sensor node call\n");
                 } else {
-                    printk("Other mac address seen, in new_mac section\n");
                     //put the last version of the SensorNode into the Nodes struct
                     nodes_collection->nodes[nodes_collection->nodes_count] = sensor;
                     //Increase the number of nodes added to the overall Nodes struct
@@ -573,7 +547,6 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                 fs_close(readings_file);
                 return -1;
             }
-            printk("Before the NULL strtok call\n");
             line = strtok(NULL, "\n");
         }
     }

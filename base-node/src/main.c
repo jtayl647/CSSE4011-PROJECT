@@ -36,6 +36,7 @@ static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes
  * ========================================================================== */
 #define MAX_SENSORS CONFIG_SENSOR_NUM
 #define SENSOR_DECOMP_STACK 2*4096
+#define JSON_CONSTRUCT_STACK 4*4096
 #define SENSOR_DECOMP_PRIO 6
 static const char* MOBILE_NAME = "MobileNode";
 static bool mobile_seen = false;
@@ -172,7 +173,7 @@ static void json_nodes_thread_fn(void *a, void *b, void *c) {
 	}
 }
 
-K_THREAD_DEFINE(json_nodes_thread, SENSOR_DECOMP_STACK,
+K_THREAD_DEFINE(json_nodes_thread, JSON_CONSTRUCT_STACK,
 		json_nodes_thread_fn, NULL, NULL, NULL,
 		SENSOR_DECOMP_PRIO, 0, 0);
 
@@ -180,13 +181,26 @@ static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes
 	//iterate through the linked list
 	struct sensor_container *c;
 	SYS_SLIST_FOR_EACH_CONTAINER(base_nodes, c, node) {
+		//print the MAC value we have from sensor:
+		printk("Sensor MAC 0-5: %02X:%02X:%02X:%02X:%02X:%02X\n",
+		decoded_sensor->mac_address[0], decoded_sensor->mac_address[1],
+		decoded_sensor->mac_address[2], decoded_sensor->mac_address[3],
+		decoded_sensor->mac_address[4], decoded_sensor->mac_address[5]);
 
+		//print the MAC value of the node we are at
+		printk("Current list MAC 0-5: %02X:%02X:%02X:%02X:%02X:%02X\n",
+			c->sensor->addr.a.val[0], c->sensor->addr.a.val[1],
+			c->sensor->addr.a.val[2], c->sensor->addr.a.val[3],
+			c->sensor->addr.a.val[4], c->sensor->addr.a.val[5]
+		);
+		
 		bool match = true;
 		//compare each value in the ll address and the decoded sensor addresss
 		for (int i = 0; i < CONFIG_MAC_BYTES; i++) {
+			//Grab current entry of this list node's mac address
 			uint8_t list_addr_piece = c->sensor->addr.a.val[i];
 			//account for potential endianness switch up
-			uint8_t decoded_addr_piece = decoded_sensor->mac_address[CONFIG_MAC_BYTES - 1 - i];
+			uint8_t decoded_addr_piece = decoded_sensor->mac_address[i];
 			if (list_addr_piece != decoded_addr_piece) {
 				match = false;
 				break;

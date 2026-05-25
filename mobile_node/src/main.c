@@ -426,27 +426,22 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 		//set the time that the mobile interracted with the base
 		nodes.mobile_sees_base = (int32_t)k_uptime_get_32();		
 		//now read from the file into nodes
-		printk("Before reading file\n");
 		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
-		printk("After the file mutex lock\n");
 		ret = mobile_lfs_read_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &nodes);
 		if (ret < 0) {
 			printk("Failed to read properly from the sensor file\n");
 		}
-		printk("After reading file\n");
 		k_mutex_unlock(&sensor_node_file_mutex);
 		//now encode the Nodes
 
 		uint8_t readings_buf[Nodes_size];
 		size_t readings_buf_len = 0;
 
-		printk("Before enncoding sensor file info\n");
 		//encode the SensorConfig struct using nanopb
 		ret = mobile_encode(readings_buf, sizeof(readings_buf), &readings_buf_len, NODES, &nodes);
 		if (ret < 0) {
 			printk("Error with nanoPB encoding of sensor config read from file\n");
 		}
-		printk("After decoding sensor file info\n");
 
 		//set the length of the msgq struct
 		base_tx.length = readings_buf_len;

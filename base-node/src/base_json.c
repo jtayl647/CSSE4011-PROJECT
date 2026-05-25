@@ -75,7 +75,7 @@ int create_sensor_json(void* sensor_node, char* sensor_name, char* json_buffer, 
     fill_outer_struct_readings(decoded_sensor, &json_sensor);
 
     //now encode to the buffer
-    int ret = json_obj_encode_buf(packet_descr, ARRAY_SIZE(packet_descr), &json_sensor, json_buffer, sizeof(json_buffer));
+    int ret = json_obj_encode_buf(packet_descr, ARRAY_SIZE(packet_descr), &json_sensor, json_buffer, (size_t)(512));
     if (ret < 0) {
         printk("Error encoding SensorNode info: %d\n", ret);
         return ret;
