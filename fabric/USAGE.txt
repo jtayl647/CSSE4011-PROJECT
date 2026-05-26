@@ -1,50 +1,67 @@
 HOW TO RUN:
 ________________________________________________________________________________________________________
-cd test-network
+cd ~/csse4011/firmware/CSSE4011-PROJECT/fabric/test-network
 ./network.sh up createChannel -c mychannel
 ./network.sh deployCC -ccn irrigation -ccp ../asset-transfer-basic/chaincode-typescript -ccl typescript
 
-cd ../asset-transfer-basic/application-gateway-typescript
-npm run build
+cd ~/csse4011/firmware/CSSE4011-PROJECT/fabric/asset-transfer-basic/application-gateway-typescript
+npm run build 
 npm run server
 ________________________________________________________________________________________________________
 
 NOTE: Server runs on http://localhost:3000
 
+Data is submitted automatically by send_http.py running on the base node host.
+The Python script reads JSON from the base node serial port, computes real
+measurement timestamps (from device uptimes), and POSTs to this server.
+
 HOW TO USE:
 
 POST /visit
   Submit a sensor node visit to the blockchain.
-  A visit is one mobile-node collection event: a node name, a timestamp,
-  and up to 12 sensor readings taken during that visit.
+  A visit is one mobile-node collection event: a node name and up to 12
+  sensor readings, each with its own computed Brisbane datetime timestamp.
+
+  The visit-level ledger key is derived from the first reading's sensor_meas_time.
 
   Body (JSON):
     {
-      "nodeName":  "garden",
-      "timestamp": "2026-05-21T08:32:00",
+      "name": "garden",
       "readings": [
-        { "Temp": 2310, "Humidity": 55, "Moisture": 42, "Pressure": 101200, "MeasTime": 1500 },
-        { "Temp": 2295, "Humidity": 56, "Moisture": 41, "Pressure": 101198, "MeasTime": 3000 }
+        {
+          "temp":             2310,
+          "humidity":         55,
+          "pressure":         101200,
+          "moisture":         42,
+          "sensor_meas_time": "2026-05-26 14:32:01.456 AEST"
+        },
+        {
+          "temp":             2295,
+          "humidity":         56,
+          "pressure":         101198,
+          "moisture":         41,
+          "sensor_meas_time": "2026-05-26 14:32:03.456 AEST"
+        }
       ]
     }
 
-  Note: Temp and Pressure are scaled integers (divide by 100 for real values).
-        e.g. Temp 2310 = 23.10 °C,  Pressure 101200 = 1012.00 hPa
+  Note: temp and pressure are scaled integers (divide by 100 for real values).
+        e.g. temp 2310 = 23.10 C,  pressure 101200 = 1012.00 hPa
+        sensor_meas_time is a Brisbane time string (AEST, UTC+10, no DST).
 
   Example:
     curl -X POST http://localhost:3000/visit \
       -H "Content-Type: application/json" \
       -d '{
-        "nodeName":  "garden",
-        "timestamp": "2026-05-21T08:32:00",
+        "name": "garden",
         "readings": [
-          { "Temp": 2310, "Humidity": 55, "Moisture": 42, "Pressure": 101200, "MeasTime": 1500 },
-          { "Temp": 2295, "Humidity": 56, "Moisture": 41, "Pressure": 101198, "MeasTime": 3000 }
+          { "temp": 2310, "humidity": 55, "pressure": 101200, "moisture": 42, "sensor_meas_time": "2026-05-26 14:32:01.456 AEST" },
+          { "temp": 2295, "humidity": 56, "pressure": 101198, "moisture": 41, "sensor_meas_time": "2026-05-26 14:32:03.456 AEST" }
         ]
       }'
 
   Response:
-    { "success": true, "id": "garden_2026-05-21T08:32:00" }
+    { "success": true, "id": "garden_2026-05-26 14:32:01.456 AEST" }
 
 ________________________________________________________________________________________________________
 
@@ -65,15 +82,15 @@ GET /visits/:nodeName
 ________________________________________________________________________________________________________
 
 GET /visit/:id
-  Returns a single visit by its full ID ("<nodeName>_<timestamp>").
+  Returns a single visit by its full ID ("<name>_<sensor_meas_time of first reading>").
 
   Example:
-    curl http://localhost:3000/visit/garden_2026-05-21T08:32:00
+    curl "http://localhost:3000/visit/garden_2026-05-26%2014%3A32%3A01.456%20AEST"
 
 ________________________________________________________________________________________________________
 
 HOW TO STOP:
 ________________________________________________________________________________________________________
-cd test-network
+cd ~/csse4011/firmware/CSSE4011-PROJECT/fabric/test-network
 ./network.sh down
 ________________________________________________________________________________________________________

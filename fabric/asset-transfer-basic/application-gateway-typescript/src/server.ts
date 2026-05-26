@@ -61,18 +61,20 @@ async function main(): Promise<void> {
     // -------------------------------------------------------------------------
     // POST /visit
     // Body: {
-    //   nodeName:  string,          // e.g. "garden"
-    //   timestamp: string,          // ISO8601, e.g. "2026-05-21T08:32:00"
-    //   readings:  Reading[]        // 1–12 items
+    //   name:     string,           // e.g. "garden"
+    //   readings: Reading[]         // 1–12 items, each with:
+    //     { temp, humidity, pressure, moisture, sensor_meas_time }
+    //     sensor_meas_time is a Brisbane datetime string, e.g. "2026-05-26 14:32:01.456 AEST"
     // }
-    // Called by the base node WiFi board when it receives a mule delivery.
+    // The visit-level timestamp is taken from the first reading's sensor_meas_time.
+    // Called by send_http.py running on the base node host.
     // -------------------------------------------------------------------------
     app.post('/visit', async (req: Request, res: Response) => {
-        const { nodeName, timestamp, readings } = req.body;
+        const { name, readings } = req.body as { name: string; readings: Record<string, unknown>[] };
 
-        if (!nodeName || !timestamp || !Array.isArray(readings) || readings.length === 0) {
+        if (!name || !Array.isArray(readings) || readings.length === 0) {
             res.status(400).json({
-                error: 'Missing required fields: nodeName (string), timestamp (string), readings (array)',
+                error: 'Missing required fields: name (string), readings (array)',
             });
             return;
         }
@@ -82,15 +84,27 @@ async function main(): Promise<void> {
             return;
         }
 
+        // Use the first reading's computed timestamp as the visit key
+        const timestamp = readings[0]!.sensor_meas_time as string;
+
+        // Map Python snake_case field names to chaincode PascalCase Reading fields
+        const mappedReadings = readings.map((r) => ({
+            Temp:     r.temp,
+            Humidity: r.humidity,
+            Pressure: r.pressure,
+            Moisture: r.moisture,
+            MeasTime: r.sensor_meas_time,
+        }));
+
         try {
             await contract.submitTransaction(
                 'SubmitVisit',
-                nodeName,
+                name,
                 timestamp,
-                JSON.stringify(readings),
+                JSON.stringify(mappedReadings),
             );
-            const id = `${nodeName}_${timestamp}`;
-            console.log(`Visit stored: ${id} (${readings.length} readings)`);
+            const id = `${name}_${timestamp}`;
+            console.log(`Visit stored: ${id} (${mappedReadings.length} readings)`);
             res.status(201).json({ success: true, id });
         } catch (err) {
             console.error('SubmitVisit failed:', err);
@@ -117,7 +131,7 @@ async function main(): Promise<void> {
     // Returns all visits for a specific sensor node.
     // -------------------------------------------------------------------------
     app.get('/visits/:nodeName', async (req: Request, res: Response) => {
-        const { nodeName } = req.params;
+        const nodeName = req.params['nodeName'] as string;
         try {
             const resultBytes = await contract.evaluateTransaction('GetVisitsByNode', nodeName);
             res.json(JSON.parse(utf8Decoder.decode(resultBytes)));
@@ -132,7 +146,7 @@ async function main(): Promise<void> {
     // Returns a single visit by its full ID ("<nodeName>_<timestamp>").
     // -------------------------------------------------------------------------
     app.get('/visit/:id', async (req: Request, res: Response) => {
-        const { id } = req.params;
+        const id = req.params['id'] as string;
         try {
             const resultBytes = await contract.evaluateTransaction('GetVisit', id);
             res.json(JSON.parse(utf8Decoder.decode(resultBytes)));

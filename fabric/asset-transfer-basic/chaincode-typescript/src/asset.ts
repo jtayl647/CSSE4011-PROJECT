@@ -20,7 +20,7 @@ export class Reading {
     public Pressure: number = 0;    // pressure (scaled int, e.g. /100 for hPa)
 
     @Property()
-    public MeasTime: number = 0;    // ms since node boot when measurement was taken
+    public MeasTime: string = '';   // Brisbane datetime when measurement was taken, e.g. "2026-05-26 14:32:01.456 AEST"
 }
 
 /*

@@ -1,9 +1,12 @@
 import serial
 import serial.tools.list_ports
 import re
+import requests
 
 import time
 from datetime import datetime, timezone, timedelta
+
+SERVER_URL = 'http://localhost:3000/visit'
 
 BRISBANE_TZ = timezone(timedelta(hours=10))
 
@@ -29,9 +32,9 @@ def compute_measurement_time(mobile_sees_base_time,
     dt_when_measurement_was_taken = real_time_mobile_sees_sensor - sensor_delay
     return dt_when_measurement_was_taken
 
-# def to_brisbane_time(unix_ms):
-#     dt = datetime.fromtimestamp(unix_ms / 1000, tz=BRISBANE_TZ)
-#     return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " AEST"
+def to_brisbane_time(unix_ms):
+    dt = datetime.fromtimestamp(unix_ms / 1000, tz=BRISBANE_TZ)
+    return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " AEST"
 
 def find_port():
     ports = serial.tools.list_ports.comports()
@@ -58,10 +61,54 @@ except serial.SerialException as e:
 
 print("Listening...")
 
+import json
+
 while True:
     line = ser.readline().decode('utf-8', errors='ignore').strip()
     if not line:
         continue
     # Strip ANSI escape codes
     line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
-    print(line)
+    # Extract JSON object if present anywhere in the line
+    match = re.search(r'\{.*\}', line)
+    if not match:
+        continue
+    candidate = match.group()
+    try:
+        data = json.loads(candidate)
+        print(json.dumps(data))
+    except json.JSONDecodeError:
+        continue
+
+    # Build cleaned output with computed timestamps
+    cleaned_readings = []
+    for reading in data.get("readings", []):
+        unix_ms = compute_measurement_time(
+            mobile_sees_base_time   = data["mobile_sees_base_time"],
+            mobile_sees_sensor_time = data["mobile_sees_sensor_time"],
+            sensor_sees_mobile_time = data["sensor_sees_mobile"],
+            sensor_meas_time        = reading["sensor_meas_time"]
+        )
+        cleaned_readings.append({
+            "temp":             reading["temp"],
+            "humidity":         reading["humidity"],
+            "pressure":         reading["pressure"],
+            "moisture":         reading["moisture"],
+            "sensor_meas_time": to_brisbane_time(unix_ms),
+        })
+
+    output = {
+        "name":     data["name"],
+        "readings": cleaned_readings,
+    }
+    print(json.dumps(output))
+
+    # POST to blockchain server
+    try:
+        resp = requests.post(SERVER_URL, json=output, timeout=10)
+        if resp.ok:
+            print(f"[OK] {resp.json()}")
+        else:
+            print(f"[ERR] {resp.status_code} {resp.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"[ERR] Could not reach server: {e}")

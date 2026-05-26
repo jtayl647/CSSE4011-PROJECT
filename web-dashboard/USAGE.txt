@@ -1,0 +1,21 @@
+open /Users/jaimeetaylor/csse4011/firmware/CSSE4011-PROJECT/web-dashboard/index.html
+
+
+
+
+
+
+sensors:
+D7:DC:46:15:F8:CC - set up
+E4:0A:D2:C0:8C:C8 - probe
+F4:82:0D:1A:F3:B9 - other
+
+
+sensor add sensor_one 1 CC F8 15 46 DC D7 - set up
+sensor add sensor_two 1 C8 8C C0 D2 0A E4 - probe
+sensor add sensor_three 1 B9 F3 1A 0D 82 F4 - other
+
+F8:EC:67:5F:9A:11 - orage wire
+D1:EC:C0:36:9F:C8 - trimpot
+
+base last one left - plane big board

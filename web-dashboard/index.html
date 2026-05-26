@@ -3,47 +3,70 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sensor Dashboard</title>
+  <title>Irrigation Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; padding: 24px; }
-    h1 { font-size: 1.3rem; margin-bottom: 20px; }
+    html, body { height: 100%; }
+    body {
+      font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0;
+      padding: 24px; display: flex; flex-direction: column; min-height: 100vh;
+    }
+
+    header {
+      display: flex; align-items: center; gap: 16px;
+      margin-bottom: 20px; flex-wrap: wrap;
+    }
+    h1 { font-size: 1.3rem; }
+
+    select {
+      background: #1a1f2e; border: 1px solid #2d3348; color: #e2e8f0;
+      padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+    }
+
+    .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #64748b; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
+    .dot.ok    { background: #34d399; }
+    .dot.error { background: #f87171; }
 
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 14px;
-      margin-bottom: 20px;
+      gap: 14px; margin-bottom: 20px;
     }
-    .card {
-      background: #1a1f2e;
-      border: 1px solid #2d3348;
-      border-radius: 10px;
-      padding: 16px;
-    }
+    .card { background: #1a1f2e; border: 1px solid #2d3348; border-radius: 10px; padding: 16px; }
     .card .label { font-size: 0.7rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
     .card .value { font-size: 1.9rem; font-weight: 700; }
     .card .unit  { font-size: 0.8rem; color: #64748b; }
 
+    .no-data { color: #64748b; font-size: 0.9rem; margin: 40px 0; text-align: center; }
+
     .charts {
+      flex: 1;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
       gap: 14px;
+      min-height: 0;
     }
     .chart-box {
-      background: #1a1f2e;
-      border: 1px solid #2d3348;
-      border-radius: 10px;
-      padding: 16px;
+      background: #1a1f2e; border: 1px solid #2d3348; border-radius: 10px; padding: 16px;
+      display: flex; flex-direction: column; min-height: 0;
     }
-    .chart-box h2 { font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 10px; }
-    canvas { max-height: 160px; }
+    .chart-box h2 { font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 10px; flex-shrink: 0; }
+    canvas { flex: 1; min-height: 0; }
   </style>
 </head>
 <body>
 
-<h1>🌱 Sensor Dashboard</h1>
+<header>
+  <h1>Irrigation Dashboard</h1>
+  <select id="node-select"><option value="">Loading…</option></select>
+  <div class="status">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text">--</span>
+  </div>
+</header>
 
 <div class="cards">
   <div class="card">
@@ -64,6 +87,8 @@
   </div>
 </div>
 
+<div id="no-data" class="no-data" style="display:none">No readings found for this node.</div>
+
 <div class="charts">
   <div class="chart-box"><h2>Soil Moisture (%)</h2><canvas id="c-moisture"></canvas></div>
   <div class="chart-box"><h2>Temperature (°C)</h2><canvas id="c-temp"></canvas></div>
@@ -72,6 +97,9 @@
 </div>
 
 <script>
+  const API     = 'http://localhost:3000';
+  const POLL_MS = 30_000;
+
   // ── chart factory ──────────────────────────────────────────────────────────
   function makeChart(id, color) {
     return new Chart(document.getElementById(id), {
@@ -80,10 +108,12 @@
         backgroundColor: color + '22', borderWidth: 2, pointRadius: 3,
         tension: 0.3, fill: true }] },
       options: {
+        responsive: true,
+        maintainAspectRatio: false,
         animation: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { ticks: { color: '#475569', maxTicksLimit: 5 }, grid: { color: '#252b3b' } },
+          x: { ticks: { color: '#475569', maxTicksLimit: 8 }, grid: { color: '#252b3b' } },
           y: { ticks: { color: '#475569' }, grid: { color: '#252b3b' } }
         }
       }
@@ -97,36 +127,128 @@
     pressure: makeChart('c-pressure', '#34d399'),
   };
 
-  // ── mock state ─────────────────────────────────────────────────────────────
-  let moisture = 65, temp = 24, humidity = 55, pressure = 1013;
+  // ── helpers ────────────────────────────────────────────────────────────────
+  // "2026-05-26 14:32:01.456 AEST" → "14:32:01"
+  function shortTime(measTime) {
+    if (typeof measTime !== 'string') return '?';
+    const parts = measTime.split(' ');
+    return parts[1] ? parts[1].split('.')[0] : measTime;
+  }
 
-  function tick() {
-    moisture = Math.max(0,   Math.min(100,  moisture + (Math.random() - 0.5) * 3));
-    temp     = Math.max(15,  Math.min(40,   temp     + (Math.random() - 0.5) * 0.4));
-    humidity = Math.max(20,  Math.min(90,   humidity + (Math.random() - 0.5) * 1.5));
-    pressure = Math.max(995, Math.min(1030, pressure + (Math.random() - 0.5) * 0.3));
+  function setStatus(state, msg) {
+    document.getElementById('status-dot').className = 'dot ' + state;
+    document.getElementById('status-text').textContent = state === 'ok'
+      ? 'Updated ' + new Date().toLocaleTimeString()
+      : (msg || 'Error');
+  }
 
-    const label = new Date().toLocaleTimeString();
+  // ── node selector ──────────────────────────────────────────────────────────
+  let allVisits = [];
+  const nodeSelect = document.getElementById('node-select');
+  nodeSelect.addEventListener('change', () => renderNode(nodeSelect.value));
 
-    document.getElementById('v-moisture').textContent = Math.round(moisture);
-    document.getElementById('v-temp').textContent     = temp.toFixed(1);
-    document.getElementById('v-humidity').textContent = Math.round(humidity);
-    document.getElementById('v-pressure').textContent = pressure.toFixed(1);
+  function populateNodeSelector(visits) {
+    const nodes = [...new Set(visits.map(v => v.NodeName).filter(Boolean))].sort();
+    const prev  = nodeSelect.value;
 
-    for (const [key, chart] of Object.entries(charts)) {
-      const val = { moisture, temp, humidity, pressure }[key];
-      chart.data.labels.push(label);
-      chart.data.datasets[0].data.push(+val.toFixed(1));
-      if (chart.data.labels.length > 20) {
-        chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
+    // Remove all existing options safely
+    while (nodeSelect.firstChild) nodeSelect.removeChild(nodeSelect.firstChild);
+
+    if (nodes.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No nodes';
+      nodeSelect.appendChild(opt);
+      return;
+    }
+
+    for (const name of nodes) {
+      const opt = document.createElement('option');
+      opt.value       = name;
+      opt.textContent = name;          // textContent is safe — no HTML injection
+      if (name === prev) opt.selected = true;
+      nodeSelect.appendChild(opt);
+    }
+
+    // Keep previous selection if still present, otherwise fall to first node
+    if (!nodes.includes(prev)) nodeSelect.value = nodes[0];
+  }
+
+  // ── render selected node ───────────────────────────────────────────────────
+  function renderNode(nodeName) {
+    const nodeVisits = allVisits.filter(v => v.NodeName === nodeName);
+
+    // Flatten all readings from all visits for this node, sort chronologically
+    const points = [];
+    for (const visit of nodeVisits) {
+      if (!Array.isArray(visit.Readings)) continue;
+      for (const r of visit.Readings) {
+        if (r && typeof r.MeasTime === 'string') points.push(r);
       }
+    }
+    points.sort((a, b) => (a.MeasTime < b.MeasTime ? -1 : a.MeasTime > b.MeasTime ? 1 : 0));
+
+    const noDataEl = document.getElementById('no-data');
+
+    if (points.length === 0) {
+      noDataEl.style.display = 'block';
+      ['v-moisture', 'v-temp', 'v-humidity', 'v-pressure'].forEach(id => {
+        document.getElementById(id).textContent = '--';
+      });
+      for (const chart of Object.values(charts)) {
+        chart.data.labels = [];
+        chart.data.datasets[0].data = [];
+        chart.update();
+      }
+      return;
+    }
+
+    noDataEl.style.display = 'none';
+
+    // Summary cards — most recent reading
+    const latest = points[points.length - 1];
+    document.getElementById('v-moisture').textContent = latest.Moisture ?? '--';
+    document.getElementById('v-temp').textContent     = latest.Temp != null ? (latest.Temp / 100).toFixed(1) : '--';
+    document.getElementById('v-humidity').textContent = latest.Humidity ?? '--';
+    document.getElementById('v-pressure').textContent = latest.Pressure != null ? (latest.Pressure / 100).toFixed(1) : '--';
+
+    // Charts
+    const labels   = points.map(p => shortTime(p.MeasTime));
+    const moisture = points.map(p => p.Moisture ?? null);
+    const temp     = points.map(p => p.Temp     != null ? p.Temp     / 100 : null);
+    const humidity = points.map(p => p.Humidity ?? null);
+    const pressure = points.map(p => p.Pressure != null ? p.Pressure / 100 : null);
+
+    function updateChart(chart, newLabels, newData) {
+      chart.data.labels           = newLabels;
+      chart.data.datasets[0].data = newData;
       chart.update();
+    }
+
+    updateChart(charts.moisture, labels, moisture);
+    updateChart(charts.temp,     labels, temp);
+    updateChart(charts.humidity, labels, humidity);
+    updateChart(charts.pressure, labels, pressure);
+  }
+
+  // ── fetch & poll ───────────────────────────────────────────────────────────
+  async function fetchAndRender() {
+    try {
+      const resp = await fetch(`${API}/visits`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!Array.isArray(data)) throw new Error('Unexpected response shape');
+
+      allVisits = data;
+      populateNodeSelector(allVisits);
+      renderNode(nodeSelect.value);
+      setStatus('ok');
+    } catch (e) {
+      setStatus('error', String(e.message ?? e));
     }
   }
 
-  tick();
-  setInterval(tick, 3000); // update every 3s
+  fetchAndRender();
+  setInterval(fetchAndRender, POLL_MS);
 </script>
 </body>
 </html>
