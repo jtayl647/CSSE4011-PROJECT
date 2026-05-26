@@ -1,4 +1,4 @@
-open /Users/jaimeetaylor/csse4011/firmware/CSSE4011-PROJECT/web-dashboard/index.html
+open ./csse4011/firmware/CSSE4011-PROJECT/web-dashboard/index.html
 
 
 
