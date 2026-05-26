@@ -87,7 +87,6 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 	int ret;
 
 	while(1) {
-		printk("Waiting to receive AllNodes struct\n");
 		//wait on a queue on received data from the mobile node
 		k_msgq_get(&sensors_decomp_msgq, &mobile_rx, K_FOREVER);
 		printk("AllNodes struct buffer received!\n");
@@ -138,7 +137,6 @@ static void json_nodes_thread_fn(void *a, void *b, void *c) {
 	Nodes nodes = Nodes_init_zero;
 
 	while(1) {
-		printk("Waiting to receive Nodes struct to json struct\n");
 		//wait on a queue on received data from the mobile node
 		k_msgq_get(&nodes_json_msgq, &nodes, K_FOREVER);
 
@@ -181,19 +179,6 @@ static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes
 	//iterate through the linked list
 	struct sensor_container *c;
 	SYS_SLIST_FOR_EACH_CONTAINER(base_nodes, c, node) {
-		//print the MAC value we have from sensor:
-		printk("Sensor MAC 0-5: %02X:%02X:%02X:%02X:%02X:%02X\n",
-		decoded_sensor->mac_address[0], decoded_sensor->mac_address[1],
-		decoded_sensor->mac_address[2], decoded_sensor->mac_address[3],
-		decoded_sensor->mac_address[4], decoded_sensor->mac_address[5]);
-
-		//print the MAC value of the node we are at
-		printk("Current list MAC 0-5: %02X:%02X:%02X:%02X:%02X:%02X\n",
-			c->sensor->addr.a.val[0], c->sensor->addr.a.val[1],
-			c->sensor->addr.a.val[2], c->sensor->addr.a.val[3],
-			c->sensor->addr.a.val[4], c->sensor->addr.a.val[5]
-		);
-		
 		bool match = true;
 		//compare each value in the ll address and the decoded sensor addresss
 		for (int i = 0; i < CONFIG_MAC_BYTES; i++) {
@@ -600,23 +585,3 @@ int main(void)
 
 	return 0;
 }
-
-// Example:
-
-// Sensor:
-// sensor add one 1 41 10 64 B4 EE E4
-// sensor config one automate 1
-
-// Randoms:
-// sensor add two 1 C8 8C C0 D2 0A E4
-// sensor add three 1 B9 F3 1A 0D 82 F4
-
-// 1. add two lots of configurations to linked list
-// 2. unplug all sensors
-// 3. keep base node in
-// 4. plug in mobile node
-// 5. see transmission between base and mobile (config successful)
-// 6. double check persistant file storage
-// 7. plug a sensor
-// 8. in mobile terminal will printed address that matches sensor that is connected
-// 9. sensor should right configs

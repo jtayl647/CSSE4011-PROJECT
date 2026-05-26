@@ -165,8 +165,6 @@ static void add_reading(int32_t temp, int32_t humidity,
 	g_node.readings[i].meas_time = (int32_t)k_uptime_get_32();
 	g_node.readings_count++;
 
-	// printk("Reading added (%d/%d)\n", g_node.readings_count, max);
-
 	k_mutex_unlock(&g_node_mutex);
 }
 
@@ -214,7 +212,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 	}
 
 	while (1) {
-		// LOG_INF("Entering Sensor Thread While Loop\n");
 		/* Values default to 0 — if a sensor is missing its field
 		 * is just 0 in the reading rather than blocking the whole save */
 		int32_t moisture_val = 0;
@@ -228,7 +225,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 			if (sensor_sample_fetch(soil) == 0 &&
 			    sensor_channel_get(soil, SENSOR_CHAN_SOIL_MOISTURE, &moisture) == 0) {
 				moisture_val = moisture.val1;
-				// LOG_INF("moisture: %d\n", moisture_val);
 			}
 		}
 
@@ -240,8 +236,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 				sensor_channel_get(sht30, SENSOR_CHAN_HUMIDITY,     &humidity);
 				temp_val     = temp.val1 * 100 + temp.val2 / 10000;
 				humidity_val = humidity.val1;
-				// LOG_INF("temp: %d\n", temp_val);
-				// LOG_INF("humidity: %d\n", humidity_val);
 			}
 		}
 
@@ -267,9 +261,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 
 		//send the readings to the writing thread
 		k_msgq_put(&file_write_msgq, &reading, K_NO_WAIT);
-
-		/* Always save — missing sensors just contribute 0 */
-		// add_reading(temp_val, humidity_val, pressure_val, moisture_val);
 
 		/* Check if automate is on and moisture is below trigger threshold */
 		k_mutex_lock(&g_config_mutex, K_FOREVER);
@@ -331,8 +322,6 @@ static void file_write_thread_fn(void *a, void *b, void *c) {
 
 			k_mutex_unlock(&file_mutex);
 			num_reads = 0;
-			// LOG_INF("Exiting File Rest Block\n");
-
 		}
 
 		//wait on the queue
@@ -512,7 +501,10 @@ int main(void)
 	/* Configure LEDs and pump GPIO */
 	gpio_pin_configure_dt(&led_r,    GPIO_OUTPUT_INACTIVE);
 	gpio_pin_configure_dt(&led_g,    GPIO_OUTPUT_INACTIVE);
-	gpio_pin_configure_dt(&pump_pin, GPIO_OUTPUT_INACTIVE);
+	int pump_err = gpio_pin_configure_dt(&pump_pin, GPIO_OUTPUT_INACTIVE);
+	if (pump_err < 0) {
+		printk("Pump GPIO error num: %d\n", pump_err);
+	}
 
 	/* Start with Red — automate off until config received */
 	led_state_automate_off();

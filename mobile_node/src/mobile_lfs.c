@@ -201,7 +201,7 @@ int mobile_lfs_config_write(void* cf, char* path, void* all_cnfgs) {
     //retrieve the number of items in the struct currently
     int num_configs = (int) all_configs->configs_count;
     if (num_configs == 0) {
-        LOG_ERR("AllCOnfigs struct empty while writing to %s\n", path);
+        LOG_ERR("AllConfigs struct empty while writing to %s\n", path);
         return -1;
     }
 
@@ -232,7 +232,7 @@ int mobile_lfs_config_write(void* cf, char* path, void* all_cnfgs) {
             return -1;
         }
 
-        printk("Successfully wrote: {%s} to %s", config_buffer, path);
+        printk("Mobile Node wrote: {%s} to config file: {%s}\n", config_buffer, path);
     
     }
 
@@ -320,7 +320,7 @@ int mobile_lfs_config_read(void* cf, char* path, void* mac_buf, void* dest_confi
 
                 //check to see if the mac address was equal
                 if (mac_same) {
-                    LOG_INF("MAC address match in config file: %d:%d:%d:%d:%d:%d\n",
+                    printk("MAC address match in config file: %d:%d:%d:%d:%d:%d\n",
                          mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
                     
                     //set the config values to be the ones we found
@@ -351,7 +351,7 @@ int mobile_lfs_config_read(void* cf, char* path, void* mac_buf, void* dest_confi
         return rc;
     }
     //The function returns by default if it does not find a config for the node
-    printk("At the [no config] -ve return\n");
+    printk("No config found\n");
     return -1;
 }
 
@@ -412,11 +412,11 @@ int mobile_lfs_write_sensor_readings(void* rf, char* path, void* sensor_node) {
             INT_32_MAX_WIDTH, data.meas_time);
 
         if (fs_write(readings_file, (void *)readings_buffer, strlen(readings_buffer)) < 0) {
-            printk("Error when writing data to Node Readings file\n");
+            printk("Error when writing data to %s\n", path);
 		    return -1;
         }
 
-        printk("Line written: %s\n", readings_buffer);
+        printk("Wrote {%s} to {%s}\n", readings_buffer, path);
     }
     //close the file
     fs_close(readings_file);
@@ -508,18 +508,14 @@ int mobile_lfs_read_sensor_readings(void* rf, char* path, void* all_nodes) {
                 );
             //check to see if we scanned the right number of things
             if (scanned == 13) {
-                LOG_INF("Successfully scanned 12 elements to %s\n", path);
-                printk("MAC: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX, ble_time: %d, mobile_sees_sensor: %d, temp: %d, humidity: %d, pressure: %d, moisture: %d, meas_time: %d\n",
+                printk("Read MAC: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX, sensor_sees_mobile: %d, mobile_sees_sensor: %d, temp: %d, humidity: %d, pressure: %d, moisture: %d, meas_time: %d\n",
                 line_mac[0], line_mac[1], line_mac[2], line_mac[3], line_mac[4], line_mac[5], sensor_sees_mobile, mobile_sees_sensor,
                 temp, humidity, pressure, moisture, meas_time);
                 //check to see if it's the first time reading
                 if (first_read) {
-                    printk("In the first read block\n");
                     //turn off the flag
                     first_read = 0;
-                    printk("Before the first copy_mac call in first read block\n");
                     //set the first repeated mac address to be the first seen
-                    //memcpy(block_mac, line_mac, CONFIG_MAC_BYTES);
                     copy_mac(block_mac, line_mac);
                 }
                 //check to see if the line mac and the block mac are the same
@@ -575,17 +571,10 @@ static void add_to_sensor_node(SensorNode* sensor, unsigned char *line_mac,
      int32_t ble_time, int32_t mobile_sees_sensor, int32_t temp,
       int32_t humidity, int32_t pressure,
        int32_t moisture, int32_t meas_time) {
-
-    printk("line MAC: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX\n", 
-    line_mac[0], line_mac[1], line_mac[2], line_mac[3],
-    line_mac[4], line_mac[5]);
+        
     //put the MAC address into the SensorNode
     copy_mac(sensor->mac_address, line_mac);
-    //memcpy(sensor->mac_address, line_mac, CONFIG_MAC_BYTES);
-    printk("MAC inside SensorNode: %02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX\n",
-    sensor->mac_address[0], sensor->mac_address[1],
-    sensor->mac_address[2], sensor->mac_address[3],
-    sensor->mac_address[4], sensor->mac_address[5]);
+    
     //put the ble time into the SensorNode
     sensor->sensor_sees_mobile = ble_time;
     //put the mobile sees sensor time into the SensorNode
