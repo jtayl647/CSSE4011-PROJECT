@@ -85,6 +85,10 @@
     <div class="label">Pressure</div>
     <div><span class="value" id="v-pressure" style="color:#34d399">--</span> <span class="unit">hPa</span></div>
   </div>
+  <div class="card">
+    <div class="label">St Lucia Temp</div>
+    <div><span class="value" id="v-ambient" style="color:#facc15">--</span> <span class="unit">°C</span></div>
+  </div>
 </div>
 
 <div id="no-data" class="no-data" style="display:none">No readings found for this node.</div>
@@ -229,6 +233,27 @@
     updateChart(charts.humidity, labels, humidity);
     updateChart(charts.pressure, labels, pressure);
   }
+
+  // ── St Lucia ambient temperature (Open-Meteo, no API key needed) ─────────
+  const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast' +
+    '?latitude=-27.4975&longitude=153.0137' +
+    '&current=temperature_2m&timezone=Australia%2FBrisbane';
+
+  async function fetchAmbientTemp() {
+    try {
+      const resp = await fetch(WEATHER_URL);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const temp = data?.current?.temperature_2m;
+      document.getElementById('v-ambient').textContent =
+        temp != null ? temp.toFixed(1) : '--';
+    } catch {
+      document.getElementById('v-ambient').textContent = '?';
+    }
+  }
+
+  fetchAmbientTemp();
+  setInterval(fetchAmbientTemp, 5 * 60 * 1000); // refresh every 5 minutes
 
   // ── fetch & poll ───────────────────────────────────────────────────────────
   async function fetchAndRender() {
