@@ -6,8 +6,6 @@
 #include <zephyr/bluetooth/services/nus.h>
 #include <zephyr/kernel.h>
 #include <string.h>
-//#include "../build/sensor_info.pb.h"
-//#include "../build/sensor_config.pb.h"
 #include <sensor_config.pb.h>
 #include <sensor_info.pb.h>
 #include <pb_encode.h>
@@ -73,51 +71,63 @@ K_MUTEX_DEFINE(sensor_configs_file_mutex);
 //Mutex to protect a shared SensorNode struct for writing from to a file
 K_MUTEX_DEFINE(shared_sensor_mutex);
 
-//mutex to protect a shared Nodes struct that is being read to
-
 //semaphore for a writing thread to begin writing to a sensorNode struct
 K_SEM_DEFINE(config_read_sem, 0, 1);
 
+//Struct representing encoded message received from a Sensor Node
 struct SensorRx {
 	uint8_t encoded[SensorNode_size];
 	uint16_t length;
 };
 
+//Struct representing encoded message transmitted to a Sensor Node
 struct SensorTx {
 	uint8_t encoded[SensorConfig_size];
 	uint16_t length;
 };
 
+//Struct representing the encoded message received from the Base Node
 struct BaseRx {
 	uint8_t encoded[AllConfigs_size];
 	uint16_t length;
 };
 
+//Struct representing the encoded message transmitted to the Base Node
 struct BaseTx {
 	uint8_t encoded[Nodes_size];
 	uint16_t length;
 };
 
+//A queue of encoded Sensor Node readings that must be written to
+//the Mobile Node's file system for readings
 K_MSGQ_DEFINE(readings_writing_msgq,
               sizeof(struct SensorRx),
               4,
               4);
 
+//A queue for submitting encoded Sensor Node readings read from the
+//Sensor Nodes readings file system
 K_MSGQ_DEFINE(readings_reading_msgq,
               sizeof(struct BaseTx),
               4,
               4);
 
+//Queue for submitting decoded MAC addresses to in order to
+//find correct configurations for each Sensor Node
 K_MSGQ_DEFINE(config_read_msgq,
               sizeof(uint8_t[CONFIG_MAC_BYTES]),
               4,
               4);
 
+//Queue for submitting encoded SensorConfig structs
+//read from the Sensor Config file
 K_MSGQ_DEFINE(sensor_config_read_msgq,
               sizeof(struct SensorTx),
               4,
               4);
 
+//Queue for submitting decoded SensorConfig structs
+//to be written into the configs file on Mobile Node
 K_MSGQ_DEFINE(sensor_config_write_msgq,
               sizeof(struct BaseRx),
               4,
@@ -202,23 +212,31 @@ static struct bt_gatt_write_params     write_params;
 
 
 
+/**
+ * Thread for writing newly received Sensor Node readings into the readings file
+ * mounted in the Mobile Node's flash memory
+ */
+
 static void readings_file_write_thread_fn(void *a, void *b, void *c) {
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 
+	//Struct of received encoded data from a Sensor Node
 	struct SensorRx sensor_rx;
 
 	while(1) {
+		//Wait on an encoded SensorNode struct received from a Sensor Node over BLE
 		k_msgq_get(&readings_writing_msgq, &sensor_rx, K_FOREVER);
 		int ret;
 
 		//transform the encoded sensor packet back into a normal sensor
 		SensorNode node = SensorNode_init_zero;
+		//Decode the encoded SensorNode struct
 		ret = mobile_decode(sensor_rx.encoded, sensor_rx.length, SENSOR_NODE, &node);
 
 		//now put in the mobile node's clock as the time the mobile seens the sensor
 		node.mobile_sees_sensor = (int32_t)k_uptime_get_32();
 		
-		//Try writing the SensorNode to a file
+		//Write the received SensorNode to the Mobile Node's readings file
 		k_mutex_lock(&sensor_node_file_mutex, K_FOREVER);
 		ret = mobile_lfs_write_sensor_readings(&sensor_nodes_file, sensor_nodes_path, &node);
 		if (ret < 0) {
@@ -226,7 +244,8 @@ static void readings_file_write_thread_fn(void *a, void *b, void *c) {
 		}
 		k_mutex_unlock(&sensor_node_file_mutex);
 
-		//chuck the address that we've seen into a queue for the config reading thread, since it needs the mac
+		//Place received SensorNode MAC address into a queue leading to thread devoted to
+		//finding correct configuration for the connected Sensor Node
 		ret = k_msgq_put(&config_read_msgq, node.mac_address, K_NO_WAIT);
 		if (ret != 0) {
 			printk("queue failed: %d\n", ret);
@@ -239,6 +258,11 @@ K_THREAD_DEFINE(readings_file_write_thread, FILE_WRITE_THREAD_STACK,
 		readings_file_write_thread_fn, NULL, NULL, NULL,
 		FILE_WRITE_THREAD_PRIO, 0, 0);
 
+
+/**
+ * Thread devoted to reading stored Sensor Node configurations from the
+ * Sensor Config file mounted on the Mobile Node's flash memory
+ */
 
 static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 
@@ -270,7 +294,9 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 
 		k_mutex_unlock(&sensor_configs_file_mutex);
 
+		//Buffer to write encoded SensorConfig data into
 		uint8_t config_buf[SensorConfig_size];
+		//Number of bytes written while encoding SensorConfig data
 		size_t config_buf_len = 0;
 
 		//encode the SensorConfig struct using nanopb
@@ -284,7 +310,8 @@ static void configs_file_read_thread_fn(void *a, void *b, void *c) {
 		//put the encoded message buffer into the struct
 		memcpy(sensor_tx.encoded, config_buf, config_buf_len);
 
-		//now put the transmission struct into the queue
+		//now put the transmission struct into the queue leading back to the BLE callback
+		//which transmits configuration settings to a Sensor Node
 		ret = k_msgq_put(&sensor_config_read_msgq, &sensor_tx, K_NO_WAIT);
 		if (ret < 0) {
 			printk("Message Queue sending config buffer to BLE callback failed\n");
@@ -299,10 +326,17 @@ K_THREAD_DEFINE(configs_file_read_thread, FILE_WRITE_THREAD_STACK,
 		FILE_WRITE_THREAD_PRIO, 0, 0);
 
 
+/**
+ * Thread devoted to writing newly received Sensor Node configurations
+ * to the Sensor Config file located in flash memory of Mobile Node
+ */
+
 static void configs_file_write_thread_fn(void *a, void *b, void *c) {
 
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 
+	//Struct to contain received encoded AllConfig information transmitted
+	//from the Base node
 	struct BaseRx base_rx;
 	int ret;
 
@@ -312,6 +346,7 @@ static void configs_file_write_thread_fn(void *a, void *b, void *c) {
 		//we have now received the information, must decode into an AllCOnfigs Struct
 		AllConfigs all_configs = AllConfigs_init_zero;
 
+		//decode the received encoded AllConfig struct transmitted from Base Node
 		ret = mobile_decode(base_rx.encoded, base_rx.length, ALL_CONFIGS, &all_configs);
 		if (ret < 0) {
 			printk("Something went wrong while decoding AllConfigs buffer sent from base\n");
@@ -319,7 +354,6 @@ static void configs_file_write_thread_fn(void *a, void *b, void *c) {
 
 		k_mutex_lock(&sensor_configs_file_mutex, K_FOREVER);
 
-		//now write this to the configs file
 		//write this config struct to the configs file
 		ret = mobile_lfs_config_write(&sensor_configs_file, sensor_configs_path, &all_configs);
 		if (ret < 0) {
@@ -335,6 +369,12 @@ K_THREAD_DEFINE(configs_file_write_thread, FILE_WRITE_THREAD_STACK,
 		configs_file_write_thread_fn, NULL, NULL, NULL,
 		FILE_WRITE_THREAD_PRIO, 0, 0);
 
+
+/**
+ * Thread devoted to reading from the Sensor Nodes readings file
+ * where all readings collected from the sensor nodes in the system
+ * are stored
+ */
 
 static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 
@@ -359,9 +399,10 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 			printk("Failed to read properly from the sensor file\n");
 		}
 		k_mutex_unlock(&sensor_node_file_mutex);
-		//now encode the Nodes
 
+		//Buffer for containing encoded Nodes information
 		uint8_t readings_buf[Nodes_size];
+		//Number of encoded Nodes Bytes
 		size_t readings_buf_len = 0;
 
 		//encode the SensorConfig struct using nanopb
@@ -375,7 +416,8 @@ static void readings_file_read_thread_fn(void *a, void *b, void *c) {
 		//put the encoded message buffer into the struct
 		memcpy(base_tx.encoded, readings_buf, readings_buf_len);
 
-		//put the struct into the queue
+		//put the encoded Nodes information into the queue leading back to
+		//the BLE callback which sends this information to the Base Node
 		ret = k_msgq_put(&readings_reading_msgq, &base_tx, K_NO_WAIT);
 		if (ret < 0) {
 			printk("Message Queue sending config buffer to BLE callback failed\n");
@@ -421,6 +463,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 	int ret;
 
+	//check if we have connected to a Sensor Node
 	if (sensor_seen) {
 
 		printk("Connected to Sensor Node\n");
@@ -439,8 +482,11 @@ static uint8_t notify_func(struct bt_conn *conn,
 			printk("queue failed: %d\n", ret);
 		}
 
+		//Empty struct to fill with received encoded SensorConfig information
 		struct SensorTx sensor_tx;
 		
+		//Wait on the queue for an encoded SensorConfig for the Sensor Node
+		//we have connected to
 		k_msgq_get(&sensor_config_read_msgq, &sensor_tx, K_FOREVER);		
 
 		if (nus_rx_handle == 0) {
@@ -463,6 +509,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 		sensor_seen = false;
 	}
 
+	//Check if we have connected to the Base Node
 	if (base_seen) {
 
 		printk("Connected to Base Node\n");

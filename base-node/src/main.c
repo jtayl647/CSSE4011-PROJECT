@@ -41,7 +41,8 @@ static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes
 static const char* MOBILE_NAME = "MobileNode";
 static bool mobile_seen = false;
 
-
+//A struct containing encoded information
+//received from a BLE transmission from the Mobile Node
 struct MobileRx {
 	uint8_t encoded[255];
 	uint16_t length;
@@ -79,6 +80,11 @@ K_MSGQ_DEFINE(nodes_json_msgq,
               4);
 
 
+/**
+ * Thread dedicated to decoding a received Nodes struct sent from the Mobile Node, containing
+ * information about all nodes visited on a muling rotation
+ */
+
 static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
@@ -87,19 +93,19 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 	int ret;
 
 	while(1) {
-		//wait on a queue on received data from the mobile node
+		//wait on a queue of received data from the mobile node
 		k_msgq_get(&sensors_decomp_msgq, &mobile_rx, K_FOREVER);
 		printk("AllNodes struct buffer received!\n");
 		//we now have information passed to us, we need to decode the Nodes struct
 		Nodes nodes = Nodes_init_zero;
+		//decode the encoded NanoPB buffer received from the queue
 		ret = base_decode(mobile_rx.encoded, mobile_rx.length, NODES, &nodes);
 		if (ret < 0) {
 			printk("Error, issue with decoding Nodes struct coming from mobile node\n");
 		}
 
-		//now we loop through the nodes struct to see what we've got
 		for (int i = 0; i < nodes.nodes_count; i++) {
-			//grab the node we are at
+			//Retrieve a SensorNode Struct from the Nodes struct
 			SensorNode current_node = nodes.nodes[i];
 			printk("MAC: {%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX} BLE_time: {%d}\n", 
 				current_node.mac_address[0], current_node.mac_address[1],
@@ -115,7 +121,8 @@ static void sensors_decomp_thread_fn(void *a, void *b, void *c) {
 			}
 		}
 
-		//put the Nodes struct into a queue that leads to the json thread
+		//Insert the decoded Nodes struct into the queue leading to the thread
+		//which creates JSON packets out of each Sensor Node
 		ret = k_msgq_put(&nodes_json_msgq, &nodes, K_NO_WAIT);
 		if (ret < 0) {
 			printk("Error putting Nodes into json queue: %d\n", ret);
@@ -129,6 +136,11 @@ K_THREAD_DEFINE(sensors_decomp_thread, SENSOR_DECOMP_STACK,
 		sensors_decomp_thread_fn, NULL, NULL, NULL,
 		SENSOR_DECOMP_PRIO, 0, 0);
 
+/**
+ * Thread dedicated to constructing JSON packets for each individual SensorNode
+ * packet of information received from the Mobile Node within a Nodes struct
+ */
+
 static void json_nodes_thread_fn(void *a, void *b, void *c) {
 
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
@@ -137,18 +149,19 @@ static void json_nodes_thread_fn(void *a, void *b, void *c) {
 	Nodes nodes = Nodes_init_zero;
 
 	while(1) {
-		//wait on a queue on received data from the mobile node
+		//wait on a decoded Nodes struct received from the Mobile Node
 		k_msgq_get(&nodes_json_msgq, &nodes, K_FOREVER);
 
-		//now we need to loop through the number of SensorNodes received
+		//For each SensorNode within Nodes, create a JSON packet
 		for (int i = 0; i < nodes.nodes_count; i++) {
 			//set up a buffer to read name into
 			char matched_name[32];
-
+			//buffer to read created JSON packets into
 			char json_buffer[512];
 
 			//lock up the linked list
 			k_mutex_lock(&sensor_ll_mutex, K_FOREVER);
+			//Find the matching name for the current SensorNode struct's MAC address
 			ret = match_name_to_mac(&nodes.nodes[i], &sensor_ll, matched_name);
 			k_mutex_unlock(&sensor_ll_mutex);
 
@@ -175,6 +188,18 @@ K_THREAD_DEFINE(json_nodes_thread, JSON_CONSTRUCT_STACK,
 		json_nodes_thread_fn, NULL, NULL, NULL,
 		SENSOR_DECOMP_PRIO, 0, 0);
 
+/**
+ * Searches through the Base Node's linked list of Sensor Nodes in the system 
+ * in order to find the name that was attached by the user to a particular Sensor Node's
+ * MAC address 
+ * 
+ * @param decoded_sensor SensorNode struct received within a Nodes struct sent by the Mobile Node
+ * @param base_nodes The Base Node's linked list of Sensor Nodes currently in the system
+ * @param name A buffer to read the retrieved name for the received MAC address into
+ * 
+ * @return 0 upon sucessfully matching the MAC address to its configured name, -1 otherwise
+ */
+
 static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes, char* name) {
 	//iterate through the linked list
 	struct sensor_container *c;
@@ -184,7 +209,6 @@ static int match_name_to_mac(SensorNode* decoded_sensor, sys_slist_t* base_nodes
 		for (int i = 0; i < CONFIG_MAC_BYTES; i++) {
 			//Grab current entry of this list node's mac address
 			uint8_t list_addr_piece = c->sensor->addr.a.val[i];
-			//account for potential endianness switch up
 			uint8_t decoded_addr_piece = decoded_sensor->mac_address[i];
 			if (list_addr_piece != decoded_addr_piece) {
 				match = false;
