@@ -408,7 +408,6 @@ SHELL_CMD_REGISTER(sensor, &sub_sensor, "Sensor node management", NULL);
 static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 			 void *ctx)
 {
-	printk("got some shit.\n");
 	//grab the data and put it into a struct
 	struct MobileRx mobile_rx;
 
@@ -437,7 +436,6 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 	AllConfigs all_configs = AllConfigs_init_zero;
 
 	k_mutex_lock(&sensor_ll_mutex, K_FOREVER);
-	printk("before sys list for loop\n");
 	int count = 0;
 	struct sensor_container *c;
 	SYS_SLIST_FOR_EACH_CONTAINER(&sensor_ll, c, node) {
@@ -449,13 +447,11 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 		all_configs.configs_count++;
 		count++;
 	}
-	printk("after sys list for loop\n");
 	k_mutex_unlock(&sensor_ll_mutex);
 
     // encode this bitch
     uint8_t configs_buf[AllConfigs_size];
     size_t configs_buf_len = 0;
-	printk("before encoding");
     //encode the AllConfigs
     ret = base_encode(configs_buf, sizeof(configs_buf), &configs_buf_len, ALL_CONFIGS, &all_configs);
     if (ret < 0) {
