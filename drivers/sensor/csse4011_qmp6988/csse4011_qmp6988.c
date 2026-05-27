@@ -241,12 +241,12 @@ static int qmp6988_channel_get(const struct device *dev,
 static int qmp6988_init(const struct device *dev)
 {
 	const struct qmp6988_config *cfg = dev->config;
-
+	// check the bus is ready
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C not ready");
 		return -ENODEV;
 	}
-
+	// check the chip is there
 	uint8_t chip_id;
 	if (i2c_reg_read_byte_dt(&cfg->i2c, QMP6988_CHIP_ID_REG, &chip_id) ||
 	    chip_id != QMP6988_CHIP_ID) {
@@ -260,6 +260,7 @@ static int qmp6988_init(const struct device *dev)
 	k_msleep(100);
 
 	/* Read factory calibration coefficients from OTP */
+	// get unique calibration
 	uint8_t otp[QMP6988_COE_LEN];
 	if (i2c_burst_read_dt(&cfg->i2c, QMP6988_COE_BASE_REG, otp,
 			      QMP6988_COE_LEN)) {

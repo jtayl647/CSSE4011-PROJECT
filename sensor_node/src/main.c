@@ -69,7 +69,6 @@ static void pump_off_work_fn(struct k_work *work)
 	gpio_pin_set_dt(&pump_pin, 0);
 	g_pump_active = false;
 	printk("Pump OFF\n");
-
 	/* Return LED to orange (automate still on) */
 	led_state_automate_on();
 }
@@ -147,16 +146,13 @@ static void add_reading(int32_t temp, int32_t humidity,
 			int32_t pressure, int32_t moisture)
 {
 	k_mutex_lock(&g_node_mutex, K_FOREVER);
-
 	pb_size_t max = (pb_size_t)ARRAY_SIZE(g_node.readings);
-
 	if (g_node.readings_count >= max) {
 		/* Full — shift left to drop oldest, safe because we own the mutex */
 		memmove(&g_node.readings[0], &g_node.readings[1],
 			(max - 1) * sizeof(DataReadings));
 		g_node.readings_count = max - 1;
 	}
-
 	pb_size_t i = g_node.readings_count;
 	g_node.readings[i].temp      = temp;
 	g_node.readings[i].humidity  = humidity;
@@ -164,7 +160,6 @@ static void add_reading(int32_t temp, int32_t humidity,
 	g_node.readings[i].moisture  = moisture;
 	g_node.readings[i].meas_time = (int32_t)k_uptime_get_32();
 	g_node.readings_count++;
-
 	k_mutex_unlock(&g_node_mutex);
 }
 
@@ -173,18 +168,14 @@ static void add_reading(int32_t temp, int32_t humidity,
 static void add_reading_data(const DataReadings *r)
 {
 	k_mutex_lock(&g_node_mutex, K_FOREVER);
-
 	pb_size_t max = (pb_size_t)ARRAY_SIZE(g_node.readings);
-
 	if (g_node.readings_count >= max) {
 		memmove(&g_node.readings[0], &g_node.readings[1],
 			(max - 1) * sizeof(DataReadings));
 		g_node.readings_count = max - 1;
 	}
-
 	g_node.readings[g_node.readings_count] = *r;
 	g_node.readings_count++;
-
 	k_mutex_unlock(&g_node_mutex);
 }
 
@@ -194,13 +185,10 @@ static void add_reading_data(const DataReadings *r)
 static void sensor_thread_fn(void *a, void *b, void *c)
 {
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
-
 	k_sleep(K_SECONDS(SENSOR_READ_INTERVAL_S));
-
 	const struct device *soil    = DEVICE_DT_GET_ANY(csse4011_soil);
 	const struct device *sht30   = DEVICE_DT_GET_ANY(sensirion_sht3xd);
 	const struct device *qmp6988 = DEVICE_DT_GET_ANY(csse4011_qmp6988);
-
 	if (!device_is_ready(soil)) {
 		printk("Soil sensor not ready\n");
 	}
@@ -210,7 +198,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 	if (!device_is_ready(qmp6988)) {
 		printk("QMP6988 not ready\n");
 	}
-
 	while (1) {
 		/* Values default to 0 — if a sensor is missing its field
 		 * is just 0 in the reading rather than blocking the whole save */
@@ -227,7 +214,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 				moisture_val = moisture.val1;
 			}
 		}
-
 		/* Temperature + humidity from SHT30 */
 		if (device_is_ready(sht30)) {
 			struct sensor_value temp, humidity;
@@ -238,7 +224,6 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 				humidity_val = humidity.val1;
 			}
 		}
-
 		/* Pressure from QMP6988 */
 		if (device_is_ready(qmp6988)) {
 			struct sensor_value pressure;
@@ -248,33 +233,27 @@ static void sensor_thread_fn(void *a, void *b, void *c)
 				// LOG_INF("pressure: %d\n", pressure_val);
 			}
 		}
-
 		//make a DataReadings struct
 		DataReadings reading = DataReadings_init_zero;
-
 		//Put the values into the struct
 		reading.temp = temp_val;
 		reading.humidity = humidity_val;
 		reading.pressure = pressure_val;
 		reading.moisture = moisture_val;
 		reading.meas_time = (int32_t)k_uptime_get_32();
-
 		//send the readings to the writing thread
 		k_msgq_put(&file_write_msgq, &reading, K_NO_WAIT);
-
 		/* Check if automate is on and moisture is below trigger threshold */
 		k_mutex_lock(&g_config_mutex, K_FOREVER);
 		bool   automate = g_automate;
 		int32_t trigger = g_water_trigger;
 		int32_t period  = g_water_period;
 		k_mutex_unlock(&g_config_mutex);
-
 		if (automate && moisture_val < trigger) {
 			printk("Moisture %d%% < trigger %d%% — activating pump\n",
 			       moisture_val, trigger);
 			pump_on(period);
 		}
-
 		k_sleep(K_SECONDS(SENSOR_READ_INTERVAL_S));
 	}
 }
@@ -291,11 +270,9 @@ K_THREAD_DEFINE(sensor_thread, SENSOR_THREAD_STACK,
  
 static void file_write_thread_fn(void *a, void *b, void *c) {
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
-
+	// what we need when we read.
 	DataReadings to_write = DataReadings_init_zero;
-
 	while(1) {
-
 		/* BLE send completed — truncate file here (not in BLE callback) */
 		if (atomic_cas(&g_file_needs_clear, 1, 0)) {
 			k_mutex_lock(&file_mutex, K_FOREVER);
@@ -308,7 +285,6 @@ static void file_write_thread_fn(void *a, void *b, void *c) {
 			}
 			k_mutex_unlock(&file_mutex);
 		}
-
 		if (num_reads >= CONFIG_NUM_READINGS) {
 			// LOG_INF("Entering File Reset Block\n");
 			//lock the mutex for the file
@@ -323,10 +299,8 @@ static void file_write_thread_fn(void *a, void *b, void *c) {
 			k_mutex_unlock(&file_mutex);
 			num_reads = 0;
 		}
-
 		//wait on the queue
 		k_msgq_get(&file_write_msgq, &to_write, K_FOREVER);
-
 		//write this information into the file
 		k_mutex_lock(&file_mutex, K_FOREVER);
 		int err = sensor_lfs_write_to_file((void*)(&readings_file), readings_path, (void*)(&to_write));
@@ -338,10 +312,8 @@ static void file_write_thread_fn(void *a, void *b, void *c) {
 			       to_write.temp, to_write.humidity, to_write.moisture, to_write.pressure, to_write.meas_time);
 		}
 		k_mutex_unlock(&file_mutex);
-
 		/* Keep g_node in sync so BLE callback never needs to read the file */
 		add_reading_data(&to_write);
-
 		//increase the number of times we have sampled data
 		num_reads++;
 	}
@@ -374,23 +346,19 @@ static void nus_received(struct bt_conn *conn, const void *data, uint16_t len,
 {
 	/* Decode incoming bytes as a SensorConfig protobuf from the mobile node */
 	SensorConfig config = SensorConfig_init_zero;
-
 	int ret = sensor_decode_function((uint8_t *)data, len, SENSOR_CONFIG, &config);
 	if (ret != 0) {
 		LOG_ERR("Failed to decode SensorConfig");
 		return;
 	}
-
 	printk("Config received — automate=%d water_period=%d water_trigger=%d\n",
 	       config.automate, config.water_period, config.water_trigger);
-
 	/* Apply config: store values and update LED state */
 	k_mutex_lock(&g_config_mutex, K_FOREVER);
 	g_automate      = config.automate;
 	g_water_period  = config.water_period;
 	g_water_trigger = config.water_trigger;
 	k_mutex_unlock(&g_config_mutex);
-
 	/* Update LED — don't change if pump is already running */
 	if (!g_pump_active) {
 		if (config.automate) {
@@ -406,21 +374,16 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 	if (!enabled) {
 		return;
 	}
-
 	printk("Mobile subscribed - sending sensor data\n");
-
 	/* Only lock g_node_mutex — no flash I/O here.
 	 * g_node is kept up to date by file_write_thread via add_reading_data(). */
 	k_mutex_lock(&g_node_mutex, K_FOREVER);
-
 	/* Stamp the time this connection happened so the mobile node knows
 	 * the uptime reference point for all the meas_time values */
 	g_node.sensor_sees_mobile = (int32_t)k_uptime_get();
-
 	/* static so it lives in BSS not on the BLE callback stack (1387 bytes) */
 	static uint8_t buf[SensorNode_size];
 	size_t  len = 0;
-
 	int ret = sensor_encode(buf, sizeof(buf), &len, SENSOR_NODE, &g_node);
 	int sent_count = (int)g_node.readings_count;
 	if (ret == 0) {
@@ -428,14 +391,11 @@ static void nus_notif_enabled(bool enabled, void *ctx)
 		/* Signal file_write_thread to truncate the file (no flash I/O here) */
 		atomic_set(&g_file_needs_clear, 1);
 	}
-
 	k_mutex_unlock(&g_node_mutex);
-
 	if (ret != 0) {
 		printk("Encode failed\n");
 		return;
 	}
-
 	int err = bt_nus_send(NULL, buf, len);
 	if (err) {
 		printk("Send failed (err %d)\n", err);
@@ -493,11 +453,9 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 int main(void)
 {
 	printk("=== Sensor Node Starting ===\n");
-
 	/* Initialise mutexes */
 	k_mutex_init(&g_node_mutex);
 	k_mutex_init(&g_config_mutex);
-
 	/* Configure LEDs and pump GPIO */
 	gpio_pin_configure_dt(&led_r,    GPIO_OUTPUT_INACTIVE);
 	gpio_pin_configure_dt(&led_g,    GPIO_OUTPUT_INACTIVE);
@@ -505,67 +463,54 @@ int main(void)
 	if (pump_err < 0) {
 		printk("Pump GPIO error num: %d\n", pump_err);
 	}
-
 	/* Start with Red — automate off until config received */
 	led_state_automate_off();
-
 	int err = bt_nus_cb_register(&nus_cb, NULL);
 	if (err) {
 		printk("Failed to register NUS callbacks: %d\n", err);
 		return err;
 	}
-
+	// Set up BT.
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Failed to enable bluetooth: %d\n", err);
 		return err;
 	}
-
-	//Set up the file system
+	// Set up the file system.
 	int f_err = sensor_lfs_init((void*)mountpoint, (void*)(&readings_file), readings_filename, readings_path);
 	if (f_err < 0) {
 		printk("Failed to initialise the LittleFS\n");
 		return f_err;
 	}
-
-
+	// Print the nodes address.
 	bt_addr_le_t addr;
 	size_t count = 1;
 	bt_id_get(&addr, &count);
 	memcpy(g_node.mac_address, addr.a.val, sizeof(g_node.mac_address));
-
 	//transfer anything that was on the file onto g_node
 	k_mutex_lock(&file_mutex, K_FOREVER);
 	k_mutex_lock(&g_node_mutex, K_FOREVER);
-
+	// Reading readings file to g_node.
 	int ret = sensor_lfs_read_from_file(&readings_file, readings_path, &g_node);
 	if (ret < 0) {
 		printk("Error when reading readings file to g_node from boot\n");
 	}
-
-	//truncate after reading from the stored stuff
+	// Truncate after reading from the stored stuff.
 	int cerr = sensor_lfs_file_truncate((void*)(&readings_file), readings_path);
 	if (cerr < 0) {
 		LOG_ERR("Failed to truncate readings file after boot\n");
 	}
-
-
 	k_mutex_unlock(&g_node_mutex);
 	k_mutex_unlock(&file_mutex);
-
 	k_sleep(K_SECONDS(3));
-
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		printk("Failed to start advertising: %d\n", err);
 		return err;
 	}
-
 	LOG_INF("Sensor node advertising, waiting for mobile...");
-
 	while (1) {
 		k_sleep(K_FOREVER);
 	}
-
 	return 0;
 }

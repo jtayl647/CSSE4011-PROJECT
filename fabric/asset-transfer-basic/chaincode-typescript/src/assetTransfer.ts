@@ -6,6 +6,10 @@ import stringify from 'json-stringify-deterministic';
 import sortKeysRecursive from 'sort-keys-recursive';
 import {Visit, Reading} from './asset';
 
+// Smart contract that runs on the blockchain!
+// 
+// How a visit should look.
+
 @Info({title: 'IrrigationData', description: 'Smart contract for storing sensor node visits'})
 export class IrrigationDataContract extends Contract {
 

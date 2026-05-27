@@ -2,6 +2,10 @@
   SPDX-License-Identifier: Apache-2.0
 */
 
+// How things should look to outsiders.
+//
+// Reading needs certain things to make it a reading and describes the types in the reading or visit.
+
 import {Object, Property} from 'fabric-contract-api';
 
 /* One sensor measurement taken during a visit */
